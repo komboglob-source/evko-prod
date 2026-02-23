@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config/config.json")
 
 find_package(PostgreSQL REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 include(FetchContent)
 
@@ -29,7 +30,7 @@ FetchContent_Declare(drogon
 )
 set(JSONCPP_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/lib/libjsoncpp.a CACHE STRING "" FORCE)
 set(JSONCPP_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/external/jsoncpp/include CACHE STRING "" FORCE)
-set(BUILD_POSTGRESQ ON CACHE BOOL "" FORCE)
+set(BUILD_POSTGRESQL ON CACHE BOOL "" FORCE)
 set(BUILD_MYSQL OFF CACHE BOOL "" FORCE)
 set(BUILD_REDIS OFF CACHE BOOL "" FORCE) # Позже может потребоваться включить Redis, должно ускорить работу программы
 set(BUILD_SQLITE OFF CACHE BOOL "" FORCE)
@@ -44,17 +45,21 @@ set(DROGON_GEN_HANDLERS_DIR
 set(DROGON_GEN_MODELS_DIR 
 	${CMAKE_CURRENT_SOURCE_DIR}/src/drogon_gen/models)
 set(DROGON_GEN_HANDLERS_SOURCES 
-	${DROGON_GEN_HANDLERS_DIR}/Test/TestCtrl.cc
-	${DROGON_GEN_HANDLERS_DIR}/JsonTest/JsonTestCtrl.cc
-	${DROGON_GEN_HANDLERS_DIR}/RestTest/RestTestCtrl.cc)
-set(DROGON_GEN_MODELS_SOURCES "")
+	${DROGON_GEN_HANDLERS_DIR}/Auth/Auth.cc)
+set(DROGON_GEN_MODELS_SOURCES 
+	${DROGON_GEN_MODELS_DIR}/Auth/Permissions.cc
+	${DROGON_GEN_MODELS_DIR}/Auth/Rolepermissions.cc
+	${DROGON_GEN_MODELS_DIR}/Auth/Roles.cc
+	${DROGON_GEN_MODELS_DIR}/Auth/Accounts.cc
+	${DROGON_GEN_MODELS_DIR}/Auth/Sessions.cc)
 
-add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${DROGON_GEN_HANDLERS_SOURCES}) # Сюда модели добавить, когда будут
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${DROGON_GEN_HANDLERS_SOURCES} ${DROGON_GEN_MODELS_SOURCES})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/log)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/log)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/config/config.json
     DESTINATION ${CMAKE_BINARY_DIR}/config)
 
@@ -65,6 +70,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     gssapi_krb5
     ssl
     crypto
+	crypt
 )
-target_include_directories(${PROJECT_NAME} PRIVATE ${DROGON_INCLUDE_DIR} ${DROGON_GEN_HANDLERS_DIR}/* ${DROGON_GEN_MODELS_DIR}/*)
+target_include_directories(${PROJECT_NAME} PRIVATE ${DROGON_INCLUDE_DIR} ${DROGON_GEN_HANDLERS_DIR} ${DROGON_GEN_MODELS_DIR})
 target_compile_options(${PROJECT_NAME} PRIVATE "-Werror" "-Wall" "-Wpedantic" -O3) 
