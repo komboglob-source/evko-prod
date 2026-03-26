@@ -49,7 +49,7 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	}
 }
 
-// curl -v -H "Authorization: Basic dXNlcjpwYXNz" -X POST http://localhost:8080/api/v1/auth/login
+// curl -v -H "Authorization: Basic QWRtaW46YWRtaW4=" -X POST http://localhost:8080/api/v1/auth/login
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Basic ") {
