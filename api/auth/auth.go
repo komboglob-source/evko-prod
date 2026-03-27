@@ -37,15 +37,21 @@ func sendTokensJSON(w http.ResponseWriter, accessToken, refreshToken string) err
 }
 
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
-	switch {
+	switch r.Method {
+	case http.MethodPost:
+		switch {
+		default:
+			fmt.Fprint(w, "Unknown url path")
+		case utils.StartsWith(path, "/login"):
+			LoginHandler(w, r)
+		case utils.StartsWith(path, "/refresh"):
+			RefreshHandler(w, r)
+		case utils.StartsWith(path, "/logout"):
+			LogoutHandler(w, r)
+		}
 	default:
-		fmt.Fprint(w, "Unknown url path")
-	case utils.StartsWith(path, "/login"):
-		LoginHandler(w, r)
-	case utils.StartsWith(path, "/refresh"):
-		RefreshHandler(w, r)
-	case utils.StartsWith(path, "/logout"):
-		LogoutHandler(w, r)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprintf(w, "Incorrect method on Auth")
 	}
 }
 
