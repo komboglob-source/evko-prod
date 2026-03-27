@@ -11,9 +11,8 @@
 Ответ `200`:
 - `access_token: string`
 - `refresh_token: string`
-- `user: { id, full_name, role, position, phone_number, email, image, login, client_id?, representative_id? }`
 
-Ошибки: `401`, `403`.
+Ошибки: `400`, `401`, `405`, `500`.
 
 ### `POST /auth/refresh`
 Назначение: перевыпуск токенов.
@@ -25,6 +24,8 @@ Body:
 - `access_token: string`
 - `refresh_token: string`
 
+Ошибки: `400`, `401`, `405`, `500`.
+
 ### `POST /auth/logout`
 Назначение: отзыв текущей сессии.
 
@@ -33,10 +34,7 @@ Header:
 
 Ответ: `204`.
 
-### `GET /auth/me`
-Назначение: получить профиль текущего пользователя.
-
-Ответ `200`: тот же формат `user`, что и в `/auth/login`.
+Ошибки: `401`, `405`, `500`.
 
 ## 2. Bootstrap
 
