@@ -5,17 +5,30 @@ import (
 	"log"
 	"net/http"
 
+	"crm_be/api/appeals"
 	"crm_be/api/auth"
 	"crm_be/api/utils"
 	"crm_be/database"
 )
 
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
+	if utils.StartsWith(path, "/auth") {
+		auth.HandleAPIRequest(w, r, path[len("/auth"):])
+		return
+	}
+
+	if !utils.CheckToken(w, r) {
+		return
+	}
+
 	switch {
 	default:
 		fmt.Fprint(w, "unknown url path")
+		w.WriteHeader(http.StatusNotFound)
 	case utils.StartsWith(path, "/auth"):
 		auth.HandleAPIRequest(w, r, path[len("/auth"):])
+	case utils.StartsWith(path, "/appeals"):
+		appeals.HandleAPIRequest(w, r, path[len("/appeals"):])
 	}
 }
 

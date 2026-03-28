@@ -3,10 +3,7 @@ package auth
 import (
 	"crm_be/api/utils"
 	"crm_be/database"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,19 +11,6 @@ import (
 	"strings"
 	"time"
 )
-
-func generateToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}
-
-func hashSHA256(input string) string {
-	h := sha256.Sum256([]byte(input))
-	return hex.EncodeToString(h[:])
-}
 
 func sendTokensJSON(w http.ResponseWriter, accessToken, refreshToken string) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -42,6 +26,7 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		switch {
 		default:
 			fmt.Fprint(w, "Unknown url path")
+			w.WriteHeader(http.StatusNotFound)
 		case utils.StartsWith(path, "/login"):
 			LoginHandler(w, r)
 		case utils.StartsWith(path, "/refresh"):
@@ -50,8 +35,8 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			LogoutHandler(w, r)
 		}
 	default:
+		fmt.Fprintf(w, "Incorrect method on auth")
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		fmt.Fprintf(w, "Incorrect method on Auth")
 	}
 }
 
@@ -92,14 +77,14 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := generateToken()
+	accessToken, err := utils.GenerateToken()
 	if err != nil {
 		log.Printf("failed to generate access token: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	refreshToken, err := generateToken()
+	refreshToken, err := utils.GenerateToken()
 	if err != nil {
 		log.Printf("failed to generate refresh token: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -109,7 +94,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = database.DB.Exec(`
 		INSERT INTO "auth"."Sessions" (account_id, access_token_hash, refresh_token_hash)
 		VALUES ($1, $2, $3)
-	`, account_id, hashSHA256(accessToken), hashSHA256(refreshToken))
+	`, account_id, utils.HashSHA256(accessToken), utils.HashSHA256(refreshToken))
 	if err != nil {
 		log.Printf("failed to create session: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -137,7 +122,7 @@ func RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT account_id, refresh_token_expires_at
 		FROM "auth"."Sessions"
 		WHERE refresh_token_hash = $1 AND revoked_at IS NULL
-	`, hashSHA256(body.RefreshToken)).Scan(&accountID, &expiresAt)
+	`, utils.HashSHA256(body.RefreshToken)).Scan(&accountID, &expiresAt)
 	if err != nil {
 		http.Error(w, "invalid or expired refresh token", http.StatusUnauthorized)
 		return
@@ -150,20 +135,20 @@ func RefreshHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, err = database.DB.Exec(`
 		DELETE FROM "auth"."Sessions" WHERE refresh_token_hash = $1
-	`, hashSHA256(body.RefreshToken))
+	`, utils.HashSHA256(body.RefreshToken))
 	if err != nil {
 		log.Printf("failed to delete old session: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	newAccessToken, err := generateToken()
+	newAccessToken, err := utils.GenerateToken()
 	if err != nil {
 		log.Printf("failed to generate access token: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	newRefreshToken, err := generateToken()
+	newRefreshToken, err := utils.GenerateToken()
 	if err != nil {
 		log.Printf("failed to generate refresh token: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -173,7 +158,7 @@ func RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = database.DB.Exec(`
 		INSERT INTO "auth"."Sessions" (account_id, access_token_hash, refresh_token_hash)
 		VALUES ($1, $2, $3)
-	`, accountID, hashSHA256(newAccessToken), hashSHA256(newRefreshToken))
+	`, accountID, utils.HashSHA256(newAccessToken), utils.HashSHA256(newRefreshToken))
 	if err != nil {
 		log.Printf("failed to create session: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -197,7 +182,7 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, err := database.DB.Exec(`
 		DELETE FROM "auth"."Sessions" WHERE access_token_hash = $1
-	`, hashSHA256(accessToken))
+	`, utils.HashSHA256(accessToken))
 	if err != nil {
 		log.Printf("failed to delete session: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
