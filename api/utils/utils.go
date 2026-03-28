@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -39,6 +42,7 @@ func GetFirstPathSegment(rawURL string) string {
 }
 
 func IsInteger(s string) int64 {
+	s = strings.TrimPrefix(s, "/")
 	if s == "" {
 		return -1
 	}
@@ -171,4 +175,80 @@ func EncodePicToBase64(pic []byte) string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(pic)
+}
+
+func EncodeImage(pic []byte) string {
+	if len(pic) == 0 {
+		return ""
+	}
+
+	if utf8.Valid(pic) {
+		value := string(pic)
+		if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "data:") {
+			return value
+		}
+	}
+
+	return "data:application/octet-stream;base64," + base64.StdEncoding.EncodeToString(pic)
+}
+
+func WriteJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func DecodeJSONBody(r *http.Request, dst any) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(dst)
+}
+
+func GetBearerToken(r *http.Request) (string, error) {
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return "", errors.New("missing or invalid authorization header")
+	}
+	return strings.TrimPrefix(authHeader, "Bearer "), nil
+}
+
+func GetCurrentAccountID(r *http.Request) (int64, error) {
+	accessToken, err := GetBearerToken(r)
+	if err != nil {
+		return 0, err
+	}
+
+	var accountID int64
+	err = database.DB.QueryRow(`
+		SELECT account_id
+		FROM "auth"."Sessions"
+		WHERE access_token_hash = $1
+		  AND revoked_at IS NULL
+		  AND access_token_expires_at > now()
+	`, HashSHA256(accessToken)).Scan(&accountID)
+	if err != nil {
+		return 0, err
+	}
+
+	return accountID, nil
+}
+
+func GetCurrentRoleName(r *http.Request) (string, error) {
+	accountID, err := GetCurrentAccountID(r)
+	if err != nil {
+		return "", err
+	}
+
+	var roleName string
+	err = database.DB.QueryRow(`
+		SELECT roles.name
+		FROM "auth"."Accounts" accounts
+		JOIN "auth"."Roles" roles ON roles.id = accounts.role_id
+		WHERE accounts.id = $1
+	`, accountID).Scan(&roleName)
+	if err != nil {
+		return "", err
+	}
+
+	return roleName, nil
 }

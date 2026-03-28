@@ -5,7 +5,6 @@ import (
 	"crm_be/database"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -24,19 +23,17 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	switch r.Method {
 	case http.MethodPost:
 		switch {
-		default:
-			fmt.Fprint(w, "Unknown url path")
-			w.WriteHeader(http.StatusNotFound)
 		case utils.StartsWith(path, "/login"):
 			LoginHandler(w, r)
 		case utils.StartsWith(path, "/refresh"):
 			RefreshHandler(w, r)
 		case utils.StartsWith(path, "/logout"):
 			LogoutHandler(w, r)
+		default:
+			http.Error(w, "unknown url path", http.StatusNotFound)
 		}
 	default:
-		fmt.Fprintf(w, "Incorrect method on auth")
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		http.Error(w, "incorrect method on auth", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -65,7 +62,9 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	var account_id int64
 	var password_hash string
 	err = database.DB.QueryRow(`
-		SELECT id, password_hash FROM "auth"."Accounts" WHERE login = $1
+		SELECT id, password_hash
+		FROM "auth"."Accounts"
+		WHERE lower(login) = lower($1)
 	`, login).Scan(&account_id, &password_hash)
 	if err != nil {
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)

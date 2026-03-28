@@ -1,0 +1,6 @@
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+*_test.go
+.DS_Store
