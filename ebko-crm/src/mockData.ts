@@ -6,6 +6,7 @@ import type {
   EquipmentType,
   EquipmentUnit,
   ProductCatalogItem,
+  Reaction,
   Site,
   TicketCriticality,
   TicketStatus,
@@ -73,6 +74,12 @@ const ticketCriticalities: TicketCriticality[] = [
   { id: 'ticket-criticality-3', name: 'Critical', deadlineDays: 1 },
 ]
 
+const reactions: Reaction[] = [
+  { id: 'reaction-1', name: 'like', picture: '' },
+  { id: 'reaction-2', name: 'dislike', picture: '' },
+  { id: 'reaction-3', name: 'done', picture: '' },
+]
+
 const employees: Employee[] = [
   {
     accountId: 'acc-emp-admin-1',
@@ -84,7 +91,7 @@ const employees: Employee[] = [
     email: 'admin@ebko.local',
     role: 'admin',
     login: 'admin',
-    passwordHash: 'admin123',
+    passwordHash: 'admin',
     hireDate: '2022-11-01',
   },
   {
@@ -95,9 +102,9 @@ const employees: Employee[] = [
     position: 'Оператор КТП',
     phoneNumber: '+7 (900) 101-10-10',
     email: 'ktp@ebko.local',
-    role: 'operator_ktp',
+    role: 'ktp',
     login: 'ktp',
-    passwordHash: 'ktp123',
+    passwordHash: 'ktp',
     hireDate: '2023-02-15',
   },
   {
@@ -108,9 +115,9 @@ const employees: Employee[] = [
     position: 'Инженер WFM',
     phoneNumber: '+7 (900) 102-10-10',
     email: 'wfm@ebko.local',
-    role: 'engineer_wfm',
+    role: 'wfm',
     login: 'wfm',
-    passwordHash: 'wfm123',
+    passwordHash: 'wfm',
     hireDate: '2023-06-20',
   },
   {
@@ -121,10 +128,23 @@ const employees: Employee[] = [
     position: 'Оператор КТП',
     phoneNumber: '+7 (900) 103-10-10',
     email: 'ktp2@ebko.local',
-    role: 'operator_ktp',
+    role: 'ktp',
     login: 'ktp2',
     passwordHash: 'ktp234',
     hireDate: '2024-01-10',
+  },
+  {
+    accountId: 'acc-emp-ebko-1',
+    fullName: 'Oleg Ebko',
+    image: '',
+    birthDate: '1982-12-14',
+    position: 'EBKO Director',
+    phoneNumber: '+7 (900) 104-10-10',
+    email: 'ebko@ebko.local',
+    role: 'ebko',
+    login: 'ebko',
+    passwordHash: 'ebko',
+    hireDate: '2021-09-01',
   },
 ]
 
@@ -142,7 +162,7 @@ const clients: ClientCompany[] = [
         phoneNumber: '+7 (903) 111-11-11',
         email: 'i.smirnova@alpha-log.ru',
         login: 'client',
-        passwordHash: 'client123',
+        passwordHash: 'client',
         role: 'client',
       },
       {
@@ -235,7 +255,7 @@ const equipment: EquipmentUnit[] = [
   {
     id: 'eq-4',
     typeId: 'eq-type-1',
-    siteId: undefined,
+    siteId: 'site-2',
     serialNumber: 'SN-40040000000111',
     name: 'Абонентский ONU CPE-8',
     weight: 1.4,
@@ -390,7 +410,7 @@ const users: UserProfile[] = [
   {
     id: 'acc-emp-ktp-1',
     fullName: 'Илья Новиков',
-    role: 'operator_ktp',
+    role: 'ktp',
     position: 'Оператор КТП',
     phoneNumber: '+7 (900) 101-10-10',
     email: 'ktp@ebko.local',
@@ -400,12 +420,22 @@ const users: UserProfile[] = [
   {
     id: 'acc-emp-wfm-1',
     fullName: 'Марк Громов',
-    role: 'engineer_wfm',
+    role: 'wfm',
     position: 'Инженер WFM',
     phoneNumber: '+7 (900) 102-10-10',
     email: 'wfm@ebko.local',
     image: '',
     login: 'wfm',
+  },
+  {
+    id: 'acc-emp-ebko-1',
+    fullName: 'Oleg Ebko',
+    role: 'ebko',
+    position: 'EBKO Director',
+    phoneNumber: '+7 (900) 104-10-10',
+    email: 'ebko@ebko.local',
+    image: '',
+    login: 'ebko',
   },
   {
     id: 'acc-rep-1',
@@ -434,11 +464,12 @@ const users: UserProfile[] = [
 ]
 
 const mockCredentialMap: Record<string, { password: string; userId: string }> = {
-  admin: { password: 'admin123', userId: 'acc-emp-admin-1' },
-  ktp: { password: 'ktp123', userId: 'acc-emp-ktp-1' },
-  wfm: { password: 'wfm123', userId: 'acc-emp-wfm-1' },
-  client: { password: 'client123', userId: 'acc-rep-1' },
+  admin: { password: 'admin', userId: 'acc-emp-admin-1' },
+  ktp: { password: 'ktp', userId: 'acc-emp-ktp-1' },
+  wfm: { password: 'wfm', userId: 'acc-emp-wfm-1' },
+  client: { password: 'client', userId: 'acc-rep-1' },
   north: { password: 'north123', userId: 'acc-rep-3' },
+  ebko: { password: 'ebko', userId: 'acc-emp-ebko-1' },
 }
 
 const dataset: CrmBootstrapData = {
@@ -453,6 +484,7 @@ const dataset: CrmBootstrapData = {
   ticketTypes,
   ticketStatuses,
   ticketCriticalities,
+  reactions,
 }
 
 export function getMockBootstrapData(): CrmBootstrapData {

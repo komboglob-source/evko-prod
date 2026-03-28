@@ -47,6 +47,15 @@ function resolveCurrentUser(user: UserProfile, data: CrmBootstrapData): UserProf
   )
 }
 
+function withCurrentUser(data: CrmBootstrapData, user: UserProfile): CrmBootstrapData {
+  const users = data.users.filter((item) => item.id !== user.id && item.login !== user.login)
+
+  return {
+    ...data,
+    users: [user, ...users],
+  }
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [data, setData] = useState<CrmBootstrapData | null>(null)
@@ -69,9 +78,10 @@ function App() {
       setIsDataLoading(true)
       const bootstrap = await loadCrmBootstrap(loginResult.tokens)
       const currentUser = resolveCurrentUser(loginResult.user, bootstrap)
+      const hydratedBootstrap = withCurrentUser(bootstrap, currentUser)
 
       setSession({ user: currentUser, tokens: loginResult.tokens })
-      setData(bootstrap)
+      setData(hydratedBootstrap)
       setActiveModule('appeals')
       setSelectedAppealId(null)
       setSelectedSiteId(null)
@@ -511,7 +521,9 @@ function App() {
 
       return {
         ...previous,
-        users: previous.users.map((item) => (item.id === user.id ? updatedUser : item)),
+        users: previous.users.some((item) => item.id === user.id)
+          ? previous.users.map((item) => (item.id === user.id ? updatedUser : item))
+          : [updatedUser, ...previous.users],
         employees: previous.employees.map((employee) =>
           employee.accountId === user.id
             ? {

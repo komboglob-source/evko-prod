@@ -8,15 +8,16 @@ interface LoginScreenProps {
 }
 
 const quickAuth = [
-  { label: 'Админ', login: 'admin', password: 'admin123' },
-  { label: 'Оператор КТП', login: 'ktp', password: 'ktp123' },
-  { label: 'Инженер WFM', login: 'wfm', password: 'wfm123' },
-  { label: 'Клиент', login: 'client', password: 'client123' },
+  { label: 'Админ', login: 'admin', password: 'admin' },
+  { label: 'Оператор КТП', login: 'ktp', password: 'ktp' },
+  { label: 'Инженер WFM', login: 'wfm', password: 'wfm' },
+  { label: 'Клиент', login: 'client', password: 'client' },
+  { label: 'EBKO', login: 'ebko', password: 'ebko' },
 ]
 
 export function LoginScreen({ onLogin, isLoading, errorMessage }: LoginScreenProps) {
   const [login, setLogin] = useState('admin')
-  const [password, setPassword] = useState('admin123')
+  const [password, setPassword] = useState('admin')
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()

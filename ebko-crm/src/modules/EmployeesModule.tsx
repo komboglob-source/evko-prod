@@ -29,7 +29,7 @@ function defaultEmployee(employees: Employee[]): Employee {
     position: '',
     phoneNumber: '',
     email: '',
-    role: 'operator_ktp',
+    role: 'ktp',
     login: '',
     passwordHash: '',
     hireDate: new Date().toISOString().slice(0, 10),
@@ -299,8 +299,9 @@ export function EmployeesModule({
                 }
                 options={[
                   { value: 'admin', label: 'Админ' },
-                  { value: 'operator_ktp', label: 'Оператор КТП' },
-                  { value: 'engineer_wfm', label: 'Инженер WFM' },
+                  { value: 'ktp', label: 'Оператор КТП' },
+                  { value: 'wfm', label: 'Инженер WFM' },
+                  { value: 'ebko', label: 'EBKO' },
                 ]}
                 placeholder={null}
                 showPlaceholder={false}

@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'operator_ktp' | 'engineer_wfm' | 'client'
+export type UserRole = 'admin' | 'ktp' | 'wfm' | 'client' | 'ebko'
 
 export type ModuleKey =
   | 'appeals'
@@ -51,6 +51,12 @@ export interface TicketCriticality {
   id: string
   name: AppealCriticality
   deadlineDays: number
+}
+
+export interface Reaction {
+  id: string
+  name: string
+  picture: string
 }
 
 export interface UserProfile {
@@ -167,6 +173,7 @@ export interface CrmBootstrapData {
   ticketTypes: TicketType[]
   ticketStatuses: TicketStatus[]
   ticketCriticalities: TicketCriticality[]
+  reactions: Reaction[]
 }
 
 export type DashboardSortField = 'updatedAt' | 'createdAt' | 'criticality' | 'title'

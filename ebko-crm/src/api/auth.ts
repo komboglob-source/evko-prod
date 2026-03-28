@@ -1,4 +1,4 @@
-﻿import { findMockUserByCredentials } from '../mockData'
+import { findMockUserByCredentials } from '../mockData'
 import type { AuthTokens, LoginPayload, LoginResult, RefreshPayload, UserProfile } from '../types'
 import { API_BASE_URL, MOCK_NETWORK_DELAY_MS, USE_MOCK_DATA, wait } from './config'
 
@@ -9,6 +9,18 @@ class ApiError extends Error {
     super(message)
     this.status = status
   }
+}
+
+function readStringValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value)
+  }
+
+  return null
 }
 
 function parseTokens(payload: unknown): AuthTokens | null {
@@ -30,21 +42,19 @@ function parseTokens(payload: unknown): AuthTokens | null {
   }
 }
 
-function parseUser(payload: unknown): UserProfile | null {
+function parseProfile(payload: unknown): UserProfile | null {
   if (!payload || typeof payload !== 'object') {
     return null
   }
 
-  const safePayload = payload as Record<string, unknown>
-  const user = safePayload.user
-  if (!user || typeof user !== 'object') {
-    return null
-  }
+  const safeUser = payload as Record<string, unknown>
+  const id = readStringValue(safeUser.id) ?? readStringValue(safeUser.account_id)
+  const fullName =
+    readStringValue(safeUser.fullName) ??
+    readStringValue(safeUser.full_name) ??
+    readStringValue(safeUser.name)
 
-  const safeUser = user as Record<string, unknown>
-  const id = (safeUser.id as string) ?? (safeUser.account_id as string)
-  const fullName = (safeUser.fullName as string) ?? (safeUser.full_name as string)
-  if (typeof id !== 'string' || typeof fullName !== 'string') {
+  if (!id || !fullName) {
     return null
   }
 
@@ -52,19 +62,48 @@ function parseUser(payload: unknown): UserProfile | null {
     id,
     fullName,
     role: safeUser.role as UserProfile['role'],
-    position: (safeUser.position as string) ?? 'Пользователь CRM',
+    position: readStringValue(safeUser.position) ?? 'Пользователь CRM',
     phoneNumber:
-      (safeUser.phoneNumber as string) ??
-      (safeUser.phone_number as string) ??
-      (safeUser.phone as string) ??
+      readStringValue(safeUser.phoneNumber) ??
+      readStringValue(safeUser.phone_number) ??
+      readStringValue(safeUser.phone) ??
       '-',
-    email: (safeUser.email as string) ?? '-',
-    image: (safeUser.image as string) ?? (safeUser.photoUrl as string) ?? '',
-    login: (safeUser.login as string) ?? id,
-    clientId: (safeUser.clientId as string | undefined) ?? (safeUser.client_id as string | undefined),
+    email: readStringValue(safeUser.email) ?? '-',
+    image: readStringValue(safeUser.image) ?? readStringValue(safeUser.photoUrl) ?? '',
+    login: readStringValue(safeUser.login) ?? id,
+    clientId: readStringValue(safeUser.clientId) ?? readStringValue(safeUser.client_id) ?? undefined,
     representativeId:
-      (safeUser.representativeId as string | undefined) ??
-      (safeUser.representative_id as string | undefined),
+      readStringValue(safeUser.representativeId) ??
+      readStringValue(safeUser.representative_id) ??
+      undefined,
+  }
+}
+
+function parseUser(payload: unknown): UserProfile | null {
+  if (!payload || typeof payload !== 'object') {
+    return null
+  }
+
+  const safePayload = payload as Record<string, unknown>
+  return parseProfile(safePayload.user)
+}
+
+async function loadCurrentProfile(tokens: AuthTokens): Promise<UserProfile | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    return parseProfile((await response.json()) as unknown)
+  } catch {
+    return null
   }
 }
 
@@ -117,12 +156,14 @@ export async function login(payload: LoginPayload): Promise<LoginResult> {
     }
 
     const bodyUser = parseUser(body)
+    const profileUser = await loadCurrentProfile(tokens)
     const mockUser = findMockUserByCredentials(payload.login, payload.password)
 
     return {
       tokens,
       user:
         bodyUser ??
+        profileUser ??
         mockUser ?? {
           id: `user-${payload.login}`,
           fullName: payload.login,

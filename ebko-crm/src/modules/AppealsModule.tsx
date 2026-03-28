@@ -84,7 +84,7 @@ function defaultCreateState(
   const firstSite = firstClientSites[0]
 
   return {
-    typeId: user.role === 'engineer_wfm' ? 'WFM' : 'KTP',
+    typeId: user.role === 'wfm' ? 'WFM' : 'KTP',
     description: '',
     criticalityId: 'Basic',
     productId: firstSite?.productIds[0] ?? products[0]?.id ?? '',
@@ -102,12 +102,12 @@ function getResponsibleCandidates(
     return employees
   }
 
-  if (user.role === 'operator_ktp') {
-    return employees.filter((employee) => employee.role === 'engineer_wfm')
+  if (user.role === 'ktp') {
+    return employees.filter((employee) => employee.role === 'wfm')
   }
 
-  if (user.role === 'engineer_wfm') {
-    return employees.filter((employee) => employee.role === 'operator_ktp')
+  if (user.role === 'wfm') {
+    return employees.filter((employee) => employee.role === 'ktp')
   }
 
   return selectedAppeal.responsibleId

@@ -12,9 +12,10 @@ export const MODULES: Array<{ key: ModuleKey; label: string }> = [
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Админ',
-  operator_ktp: 'Оператор КТП',
-  engineer_wfm: 'Инженер WFM',
+  ktp: 'Оператор КТП',
+  wfm: 'Инженер WFM',
   client: 'Клиент',
+  ebko: 'EBKO',
 }
 
 export const STATUS_ORDER: AppealStatus[] = [

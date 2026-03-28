@@ -30,11 +30,11 @@ export function canEditAppeal(user: UserProfile, appeal: Appeal): boolean {
     return true
   }
 
-  if (user.role === 'operator_ktp') {
+  if (user.role === 'ktp') {
     return true
   }
 
-  if (user.role === 'engineer_wfm') {
+  if (user.role === 'wfm') {
     return appeal.typeId === 'WFM'
   }
 
@@ -42,15 +42,19 @@ export function canEditAppeal(user: UserProfile, appeal: Appeal): boolean {
 }
 
 export function canCreateAppealType(user: UserProfile, type: Appeal['typeId']): boolean {
-  if (user.role === 'admin' || user.role === 'operator_ktp') {
+  if (user.role === 'admin' || user.role === 'ktp') {
     return true
   }
 
-  if (user.role === 'engineer_wfm') {
+  if (user.role === 'wfm') {
     return type === 'WFM'
   }
 
-  return true
+  if (user.role === 'client') {
+    return true
+  }
+
+  return false
 }
 
 export function canChangeStatus(
@@ -66,7 +70,7 @@ export function canChangeStatus(
     return true
   }
 
-  if (user.role === 'operator_ktp') {
+  if (user.role === 'ktp') {
     if (nextStatus === 'Created' || nextStatus === 'Verified') {
       return false
     }
@@ -74,7 +78,7 @@ export function canChangeStatus(
     return true
   }
 
-  if (user.role === 'engineer_wfm') {
+  if (user.role === 'wfm') {
     if (nextStatus === 'Created' || nextStatus === 'Verified') {
       return false
     }
@@ -98,7 +102,7 @@ export function canAssignResponsible(user: UserProfile, appeal: Appeal): boolean
     return true
   }
 
-  if (user.role === 'operator_ktp' || user.role === 'engineer_wfm') {
+  if (user.role === 'ktp' || user.role === 'wfm') {
     return true
   }
 
@@ -106,7 +110,7 @@ export function canAssignResponsible(user: UserProfile, appeal: Appeal): boolean
 }
 
 export function canLinkAppeals(user: UserProfile): boolean {
-  return user.role !== 'client'
+  return user.role === 'admin' || user.role === 'ktp' || user.role === 'wfm'
 }
 
 export function canViewEmployeeCredentials(user: UserProfile): boolean {
@@ -114,7 +118,7 @@ export function canViewEmployeeCredentials(user: UserProfile): boolean {
 }
 
 export function canManageEmployees(user: UserProfile): boolean {
-  return user.role === 'admin'
+  return user.role === 'admin' || user.role === 'ebko'
 }
 
 export function canViewCustomer(user: UserProfile, customer: ClientCompany): boolean {
@@ -158,7 +162,7 @@ export function canViewEquipment(user: UserProfile): boolean {
 }
 
 export function canManageEquipment(user: UserProfile): boolean {
-  return user.role === 'admin' || user.role === 'engineer_wfm'
+  return user.role === 'admin' || user.role === 'wfm'
 }
 
 export function canEditEquipment(user: UserProfile): boolean {
