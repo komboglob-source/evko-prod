@@ -21,6 +21,7 @@ import type {
   TicketStatus,
   TicketType,
 } from '../types'
+import { createRandomId } from '../utils/random'
 import { API_BASE_URL, MOCK_NETWORK_DELAY_MS, USE_MOCK_DATA, wait } from './config'
 
 const NANOSECONDS_PER_DAY = 24 * 60 * 60 * 1_000_000_000
@@ -133,6 +134,15 @@ function fetchJSON(tokens: AuthTokens, path: string): Promise<unknown> {
   }).then(checkResponse)
 }
 
+async function safeFetchJSON<T>(tokens: AuthTokens, path: string, fallback: T): Promise<T | unknown> {
+  try {
+    return await fetchJSON(tokens, path)
+  } catch (error) {
+    console.error(`Failed to fetch ${path}`, error)
+    return fallback
+  }
+}
+
 function normalizeProduct(rawProduct: unknown): ProductCatalogItem {
   const safeProduct = (rawProduct && typeof rawProduct === 'object' ? rawProduct : {}) as Record<
     string,
@@ -140,7 +150,7 @@ function normalizeProduct(rawProduct: unknown): ProductCatalogItem {
   >
 
   return {
-    id: readStringValue(safeProduct.id, crypto.randomUUID()),
+    id: readStringValue(safeProduct.id, createRandomId()),
     name: readStringValue(safeProduct.name),
     description: readStringValue(safeProduct.description),
   }
@@ -150,7 +160,7 @@ function normalizeEquipmentType(rawType: unknown): EquipmentType {
   const safeType = (rawType && typeof rawType === 'object' ? rawType : {}) as Record<string, unknown>
 
   return {
-    id: readStringValue(safeType.id, crypto.randomUUID()),
+    id: readStringValue(safeType.id, createRandomId()),
     name: readStringValue(safeType.name),
     description: readStringValue(safeType.description),
   }
@@ -160,7 +170,7 @@ function normalizeTicketType(rawType: unknown): TicketType {
   const safeType = (rawType && typeof rawType === 'object' ? rawType : {}) as Record<string, unknown>
 
   return {
-    id: readStringValue(safeType.id, crypto.randomUUID()),
+    id: readStringValue(safeType.id, createRandomId()),
     name: normalizeAppealType(safeType.name),
   }
 }
@@ -173,7 +183,7 @@ function normalizeTicketStatus(rawStatus: unknown): TicketStatus {
   const name = normalizeAppealStatus(readStringValue(safeStatus.name))
 
   return {
-    id: readStringValue(safeStatus.id, crypto.randomUUID()),
+    id: readStringValue(safeStatus.id, createRandomId()),
     name,
   }
 }
@@ -185,7 +195,7 @@ function normalizeTicketCriticality(rawCriticality: unknown): TicketCriticality 
   const name = normalizeCriticality(safeCriticality.name)
 
   return {
-    id: readStringValue(safeCriticality.id, crypto.randomUUID()),
+    id: readStringValue(safeCriticality.id, createRandomId()),
     name,
     deadlineDays: normalizeDeadlineDays(
       safeCriticality.deadlineDays ?? safeCriticality.deadline_days ?? safeCriticality.deadline,
@@ -200,7 +210,7 @@ function normalizeReaction(rawReaction: unknown): Reaction {
   ) as Record<string, unknown>
 
   return {
-    id: readStringValue(safeReaction.id, crypto.randomUUID()),
+    id: readStringValue(safeReaction.id, createRandomId()),
     name: readStringValue(safeReaction.name),
     picture: readStringValue(safeReaction.picture),
   }
@@ -214,7 +224,7 @@ function normalizeRepresentative(rawRepresentative: unknown): ClientRepresentati
   return {
     accountId:
       readOptionalStringValue(safeRepresentative.accountId) ??
-      readStringValue(safeRepresentative.account_id, crypto.randomUUID()),
+      readStringValue(safeRepresentative.account_id, createRandomId()),
     clientId:
       readOptionalStringValue(safeRepresentative.clientId) ??
       readStringValue(safeRepresentative.client_id, ''),
@@ -245,7 +255,7 @@ function normalizeClient(rawClient: unknown): ClientCompany {
   >
 
   return {
-    id: readStringValue(safeClient.id, crypto.randomUUID()),
+    id: readStringValue(safeClient.id, createRandomId()),
     name: readStringValue(safeClient.name),
     address: readStringValue(safeClient.address),
     ceoId: readOptionalStringValue(safeClient.ceoId ?? safeClient.ceo_id),
@@ -265,7 +275,7 @@ function normalizeSite(rawSite: unknown): Site {
       : []
 
   return {
-    id: readStringValue(safeSite.id, crypto.randomUUID()),
+    id: readStringValue(safeSite.id, createRandomId()),
     name: readStringValue(safeSite.name),
     address: readStringValue(safeSite.address),
     responsibleId:
@@ -283,7 +293,7 @@ function normalizeEquipment(rawEquipment: unknown): EquipmentUnit {
   ) as Record<string, unknown>
 
   return {
-    id: readStringValue(safeEquipment.id, crypto.randomUUID()),
+    id: readStringValue(safeEquipment.id, createRandomId()),
     typeId: readOptionalStringValue(safeEquipment.typeId) ?? readStringValue(safeEquipment.type_id, ''),
     siteId: readOptionalStringValue(safeEquipment.siteId ?? safeEquipment.site_id),
     serialNumber:
@@ -302,7 +312,7 @@ function normalizeEmployee(rawEmployee: unknown): Employee {
   return {
     accountId:
       readOptionalStringValue(safeEmployee.accountId) ??
-      readStringValue(safeEmployee.account_id, crypto.randomUUID()),
+      readStringValue(safeEmployee.account_id, createRandomId()),
     fullName:
       readOptionalStringValue(safeEmployee.fullName) ??
       readStringValue(safeEmployee.full_name, 'Сотрудник CRM'),
@@ -344,7 +354,7 @@ function normalizeComment(rawComment: unknown, fallbackTicketId: string): Appeal
     new Date().toISOString()
 
   return {
-    id: readStringValue(safeComment.id, crypto.randomUUID()),
+    id: readStringValue(safeComment.id, createRandomId()),
     ticketId:
       readOptionalStringValue(safeComment.ticketId) ??
       readStringValue(safeComment.ticket_id) ??
@@ -531,8 +541,8 @@ async function loadAppealRelations(
   appealId: string,
 ): Promise<Pick<Appeal, 'comments' | 'linkedTicketIds' | 'links'>> {
   const [commentsPayload, linksPayload] = await Promise.all([
-    fetchJSON(tokens, `/appeals/${appealId}/comments`),
-    fetchJSON(tokens, `/appeals/${appealId}/links`),
+    safeFetchJSON(tokens, `/appeals/${appealId}/comments`, [] as unknown[]),
+    safeFetchJSON(tokens, `/appeals/${appealId}/links`, [] as unknown[]),
   ])
 
   const comments = Array.isArray(commentsPayload)
@@ -735,11 +745,11 @@ export async function loadCrmBootstrap(tokens: AuthTokens): Promise<CrmBootstrap
 
   const [appealsPayload, employeesPayload, clientsPayload, sitesPayload, equipmentPayload] =
     await Promise.all([
-      fetchJSON(tokens, '/appeals'),
-      fetchJSON(tokens, '/employees'),
-      fetchJSON(tokens, '/clients'),
-      fetchJSON(tokens, '/sites'),
-      fetchJSON(tokens, '/equipment'),
+      safeFetchJSON(tokens, '/appeals', [] as unknown[]),
+      safeFetchJSON(tokens, '/employees', [] as unknown[]),
+      safeFetchJSON(tokens, '/clients', [] as unknown[]),
+      safeFetchJSON(tokens, '/sites', [] as unknown[]),
+      safeFetchJSON(tokens, '/equipment', [] as unknown[]),
     ])
 
   const normalizedAppeals = Array.isArray(appealsPayload)

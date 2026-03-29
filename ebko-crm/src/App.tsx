@@ -122,8 +122,11 @@ function App() {
     } catch (error) {
       if (error instanceof ApiError) {
         setErrorMessage(error.message)
+      } else if (error instanceof Error) {
+        console.error('Login bootstrap failed', error)
+        setErrorMessage(error.message || 'Не удалось выполнить вход. Повторите попытку.')
       } else {
-        setErrorMessage('Не удалось выполнить вход. Проверьте доступность API.')
+        setErrorMessage('Не удалось выполнить вход. Повторите попытку.')
       }
     } finally {
       setIsAuthLoading(false)

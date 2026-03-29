@@ -17,6 +17,7 @@ import type {
 import { CustomSelect } from '../components/CustomSelect'
 import { formatDateTime } from '../utils/format'
 import { canChangeStatus } from '../utils/permissions'
+import { createRandomId } from '../utils/random'
 
 interface TaskBoardModuleProps {
   user: UserProfile
@@ -45,7 +46,7 @@ const defaultSort: TaskDashboardSort = {
 
 function createDashboard(name = 'Мои обращения'): TaskDashboard {
   return {
-    id: crypto.randomUUID(),
+    id: createRandomId(),
     name,
     filters: { ...defaultFilters },
     sort: { ...defaultSort },

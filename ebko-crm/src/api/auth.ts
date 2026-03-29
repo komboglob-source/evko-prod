@@ -1,5 +1,6 @@
 import { findMockUserByCredentials } from '../mockData'
 import type { AuthTokens, LoginPayload, LoginResult, RefreshPayload, UserProfile } from '../types'
+import { createRandomTokenFragment } from '../utils/random'
 import { API_BASE_URL, MOCK_NETWORK_DELAY_MS, USE_MOCK_DATA, wait } from './config'
 
 class ApiError extends Error {
@@ -108,7 +109,7 @@ async function loadCurrentProfile(tokens: AuthTokens): Promise<UserProfile | nul
 }
 
 function generateMockTokens(): AuthTokens {
-  const random = crypto.randomUUID().replaceAll('-', '')
+  const random = createRandomTokenFragment()
   return {
     accessToken: `mock_access_${random}`,
     refreshToken: `mock_refresh_${random}`,
@@ -194,7 +195,7 @@ export async function refreshToken(payload: RefreshPayload): Promise<AuthTokens>
   if (USE_MOCK_DATA) {
     await wait(120)
     return {
-      accessToken: `mock_access_${crypto.randomUUID().replaceAll('-', '')}`,
+      accessToken: `mock_access_${createRandomTokenFragment()}`,
       refreshToken: payload.refreshToken,
     }
   }
