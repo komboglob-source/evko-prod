@@ -293,6 +293,19 @@ label {
   margin: 8px 0;
 }
 
+.appeal-card-title {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.appeal-card-type {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .appeal-card p {
   color: var(--text-muted);
 }
@@ -332,6 +345,26 @@ label {
 .detail-main h2 {
   font-size: 28px;
   letter-spacing: -0.015em;
+}
+
+.appeal-detail-type {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.appeal-detail-title {
+  font-size: 36px;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.readonly-banner {
+  border: 1px solid #d9c7ad;
+  border-radius: var(--radius-md);
+  background: #fff7ea;
+  color: #6b5030;
+  padding: 12px 14px;
 }
 
 .description-full {
@@ -412,6 +445,44 @@ label {
   gap: 10px;
 }
 
+.markdown-content {
+  display: grid;
+  gap: 8px;
+  line-height: 1.6;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 20px;
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid #d9c7ad;
+  padding-left: 12px;
+  color: var(--text-muted);
+}
+
+.markdown-content code {
+  background: #f6ece0;
+  border-radius: 6px;
+  padding: 1px 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95em;
+}
+
 .preview-box {
   border: 1px solid #dfcfbb;
   border-radius: var(--radius-sm);
@@ -481,6 +552,12 @@ label {
   border-radius: 18px;
   object-fit: cover;
   border: 1px solid var(--line);
+}
+
+.avatar-photo.avatar-photo-sm {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
 }
 
 .data-columns {

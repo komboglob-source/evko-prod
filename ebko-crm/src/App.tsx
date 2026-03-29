@@ -1,6 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
-import { ApiError, login, logout } from './api/auth'
+import {
+  ApiError,
+  loadCurrentProfile,
+  login,
+  logout,
+  refreshToken,
+  syncCurrentProfile,
+} from './api/auth'
 import {
   loadAppealById,
   loadCrmBootstrap,
@@ -33,7 +40,6 @@ import { TaskBoardModule } from './modules/TaskBoardModule'
 import type {
   Appeal,
   AppealLinkType,
-  AppealStatus,
   AuthTokens,
   ClientRepresentative,
   ClientCompany,
@@ -53,6 +59,89 @@ interface Session {
   tokens: AuthTokens
 }
 
+const SESSION_STORAGE_KEY = 'ebko-crm-session'
+
+interface StoredSessionSnapshot {
+  tokens: AuthTokens
+  user?: UserProfile
+}
+
+function readStoredSession(): StoredSessionSnapshot | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw) as {
+      tokens?: Partial<AuthTokens>
+      user?: Partial<UserProfile>
+    }
+    if (
+      !parsed.tokens ||
+      typeof parsed.tokens.accessToken !== 'string' ||
+      typeof parsed.tokens.refreshToken !== 'string'
+    ) {
+      return null
+    }
+
+    return {
+      tokens: {
+        accessToken: parsed.tokens.accessToken,
+        refreshToken: parsed.tokens.refreshToken,
+      },
+      user:
+        parsed.user &&
+        typeof parsed.user.id === 'string' &&
+        typeof parsed.user.fullName === 'string' &&
+        typeof parsed.user.role === 'string' &&
+        typeof parsed.user.position === 'string' &&
+        typeof parsed.user.phoneNumber === 'string' &&
+        typeof parsed.user.email === 'string' &&
+        typeof parsed.user.image === 'string' &&
+        typeof parsed.user.login === 'string'
+          ? {
+              id: parsed.user.id,
+              fullName: parsed.user.fullName,
+              role: parsed.user.role as UserProfile['role'],
+              position: parsed.user.position,
+              phoneNumber: parsed.user.phoneNumber,
+              email: parsed.user.email,
+              image: parsed.user.image,
+              login: parsed.user.login,
+              clientId: typeof parsed.user.clientId === 'string' ? parsed.user.clientId : undefined,
+              representativeId:
+                typeof parsed.user.representativeId === 'string'
+                  ? parsed.user.representativeId
+                  : undefined,
+            }
+          : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistStoredSession(session: Session): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
+}
+
+function clearStoredTokens(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.removeItem(SESSION_STORAGE_KEY)
+}
+
 function resolveCurrentUser(user: UserProfile, data: CrmBootstrapData): UserProfile {
   return (
     data.users.find((item) => item.id === user.id || item.login === user.login) ??
@@ -67,6 +156,28 @@ function withCurrentUser(data: CrmBootstrapData, user: UserProfile): CrmBootstra
   return {
     ...data,
     users: [user, ...users],
+  }
+}
+
+async function hydrateSession(
+  tokens: AuthTokens,
+  fallbackUser?: UserProfile,
+): Promise<{ session: Session; data: CrmBootstrapData }> {
+  const [bootstrap, currentUserFromAPI] = await Promise.all([
+    loadCrmBootstrap(tokens),
+    loadCurrentProfile(tokens),
+  ])
+
+  const currentUser =
+    currentUserFromAPI ?? (fallbackUser ? resolveCurrentUser(fallbackUser, bootstrap) : null)
+
+  if (!currentUser) {
+    throw new Error('Не удалось загрузить текущий профиль.')
+  }
+
+  return {
+    session: { user: currentUser, tokens },
+    data: withCurrentUser(bootstrap, currentUser),
   }
 }
 
@@ -96,9 +207,62 @@ function App() {
   const [selectedRepresentativeKey, setSelectedRepresentativeKey] = useState<string | null>(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const [isDataLoading, setIsDataLoading] = useState(false)
+  const [isSessionRestoring, setIsSessionRestoring] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const isSignedIn = Boolean(session && data)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function restoreSession(): Promise<void> {
+      const storedSession = readStoredSession()
+      if (!storedSession) {
+        setIsSessionRestoring(false)
+        return
+      }
+
+      setIsDataLoading(true)
+
+      try {
+        let activeTokens = storedSession.tokens
+        let hydrated: { session: Session; data: CrmBootstrapData }
+
+        try {
+          hydrated = await hydrateSession(activeTokens, storedSession.user)
+        } catch {
+          activeTokens = await refreshToken({ refreshToken: storedSession.tokens.refreshToken })
+          hydrated = await hydrateSession(activeTokens, storedSession.user)
+        }
+
+        if (cancelled) {
+          return
+        }
+
+        persistStoredSession(hydrated.session)
+        setSession(hydrated.session)
+        setData(hydrated.data)
+      } catch (error) {
+        console.error('Session restore failed', error)
+        clearStoredTokens()
+        if (!cancelled) {
+          setSession(null)
+          setData(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsDataLoading(false)
+          setIsSessionRestoring(false)
+        }
+      }
+    }
+
+    void restoreSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleLogin(payload: LoginPayload): Promise<void> {
     setIsAuthLoading(true)
@@ -107,12 +271,11 @@ function App() {
     try {
       const loginResult = await login(payload)
       setIsDataLoading(true)
-      const bootstrap = await loadCrmBootstrap(loginResult.tokens)
-      const currentUser = resolveCurrentUser(loginResult.user, bootstrap)
-      const hydratedBootstrap = withCurrentUser(bootstrap, currentUser)
+      const hydrated = await hydrateSession(loginResult.tokens, loginResult.user)
 
-      setSession({ user: currentUser, tokens: loginResult.tokens })
-      setData(hydratedBootstrap)
+      persistStoredSession(hydrated.session)
+      setSession(hydrated.session)
+      setData(hydrated.data)
       setActiveModule('appeals')
       setSelectedAppealId(null)
       setSelectedSiteId(null)
@@ -143,6 +306,7 @@ function App() {
       }
     }
 
+    clearStoredTokens()
     setSession(null)
     setData(null)
     setSelectedAppealId(null)
@@ -153,6 +317,20 @@ function App() {
     setErrorMessage(null)
   }
 
+  if (isSessionRestoring) {
+    return (
+      <div className="login-layout">
+        <div className="login-card">
+          <div className="login-header">
+            <span className="brand-caption">EBKO CRM</span>
+            <h1>Восстановление сессии</h1>
+            <p>Проверяем сохранённый вход и загружаем данные.</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!isSignedIn || !session || !data) {
     return <LoginScreen onLogin={handleLogin} isLoading={isAuthLoading} errorMessage={errorMessage} />
   }
@@ -161,12 +339,10 @@ function App() {
   const currentData: CrmBootstrapData = data
 
   async function refreshData(): Promise<void> {
-    const bootstrap = await loadCrmBootstrap(tokens)
-    const currentUser = resolveCurrentUser(user, bootstrap)
-    const hydratedBootstrap = withCurrentUser(bootstrap, currentUser)
-
-    setSession((previous) => (previous ? { ...previous, user: currentUser } : previous))
-    setData(hydratedBootstrap)
+    const hydrated = await hydrateSession(tokens, user)
+    persistStoredSession(hydrated.session)
+    setSession(hydrated.session)
+    setData(hydrated.data)
   }
 
   function replaceAppeals(nextAppeals: Appeal[]): void {
@@ -293,54 +469,19 @@ function App() {
   }
 
   async function updateProfile(patch: Partial<UserProfile>): Promise<void> {
-    const updatedUser = { ...user, ...patch }
+    setIsDataLoading(true)
 
-    setSession((previous) => (previous ? { ...previous, user: updatedUser } : previous))
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
+    try {
+      const updatedUser = await syncCurrentProfile(tokens, patch)
+      const bootstrap = await loadCrmBootstrap(tokens)
+      const hydratedBootstrap = withCurrentUser(bootstrap, updatedUser)
 
-      return {
-        ...previous,
-        users: previous.users.some((item) => item.id === user.id)
-          ? previous.users.map((item) => (item.id === user.id ? updatedUser : item))
-          : [updatedUser, ...previous.users],
-        employees: previous.employees.map((employee) =>
-          employee.accountId === user.id
-            ? {
-                ...employee,
-                image: patch.image ?? employee.image,
-                position: patch.position ?? employee.position,
-                phoneNumber: patch.phoneNumber ?? employee.phoneNumber,
-                email: patch.email ?? employee.email,
-              }
-            : employee,
-        ),
-        clients: previous.clients.map((client) => ({
-          ...client,
-          representatives: client.representatives.map((representative) =>
-            representative.accountId === user.representativeId
-              ? {
-                  ...representative,
-                  image: patch.image ?? representative.image,
-                  position: patch.position ?? representative.position,
-                  phoneNumber: patch.phoneNumber ?? representative.phoneNumber,
-                  email: patch.email ?? representative.email,
-                }
-              : representative,
-          ),
-        })),
-      }
-    })
-  }
-
-  async function moveAppeal(appealId: string, nextStatus: AppealStatus): Promise<void> {
-    await updateAppeal(appealId, {
-      statusId: nextStatus,
-      updatedAt: new Date().toISOString(),
-      updatedBy: user.id,
-    })
+      persistStoredSession({ user: updatedUser, tokens })
+      setSession((previous) => (previous ? { ...previous, user: updatedUser } : previous))
+      setData(hydratedBootstrap)
+    } finally {
+      setIsDataLoading(false)
+    }
   }
 
   function openPerson(accountId: string): void {
@@ -495,7 +636,6 @@ function App() {
             clients={currentData.clients}
             sites={currentData.sites}
             products={currentData.products}
-            onMoveAppeal={moveAppeal}
             onOpenAppeal={(appealId) => {
               setSelectedAppealId(appealId)
               setSelectedEmployeeId(null)

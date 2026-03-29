@@ -3,7 +3,6 @@ import { CRITICALITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, STATUS_ORDER } from 
 import type {
   Appeal,
   AppealCriticality,
-  AppealStatus,
   ClientCompany,
   DashboardSortField,
   Employee,
@@ -16,7 +15,6 @@ import type {
 } from '../types'
 import { CustomSelect } from '../components/CustomSelect'
 import { formatDateTime } from '../utils/format'
-import { canChangeStatus } from '../utils/permissions'
 import { createRandomId } from '../utils/random'
 
 interface TaskBoardModuleProps {
@@ -26,7 +24,6 @@ interface TaskBoardModuleProps {
   clients: ClientCompany[]
   sites: Site[]
   products: ProductCatalogItem[]
-  onMoveAppeal: (appealId: string, nextStatus: AppealStatus) => Promise<void>
   onOpenAppeal: (appealId: string) => void
 }
 
@@ -127,7 +124,6 @@ export function TaskBoardModule({
   clients,
   sites,
   products,
-  onMoveAppeal,
   onOpenAppeal,
 }: TaskBoardModuleProps) {
   const [dashboards, setDashboards] = useState<TaskDashboard[]>(() => loadDashboards(user.id))
@@ -135,7 +131,6 @@ export function TaskBoardModule({
     const loaded = loadDashboards(user.id)
     return loaded[0]?.id ?? ''
   })
-  const [draggedAppealId, setDraggedAppealId] = useState<string | null>(null)
   const [draggedDashboardId, setDraggedDashboardId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -468,30 +463,7 @@ export function TaskBoardModule({
           const columnAppeals = dashboardAppeals.filter((appeal) => appeal.statusId === status)
 
           return (
-            <div
-              key={status}
-              className="board-column"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => {
-                if (!draggedAppealId) {
-                  return
-                }
-
-                const draggedAppeal = visibleAppeals.find((appeal) => appeal.id === draggedAppealId)
-                if (!draggedAppeal) {
-                  setDraggedAppealId(null)
-                  return
-                }
-
-                if (draggedAppeal.statusId === status || !canChangeStatus(user, draggedAppeal, status)) {
-                  setDraggedAppealId(null)
-                  return
-                }
-
-                void onMoveAppeal(draggedAppealId, status)
-                setDraggedAppealId(null)
-              }}
-            >
+            <div key={status} className="board-column">
               <div className="board-column-header">
                 <h3>{STATUS_LABELS[status]}</h3>
                 <span>{columnAppeals.length}</span>
@@ -499,16 +471,7 @@ export function TaskBoardModule({
 
               <div className="board-column-content">
                 {columnAppeals.map((appeal) => (
-                  <div
-                    key={appeal.id}
-                    className="board-card"
-                    draggable={STATUS_ORDER.some(
-                      (nextStatus) =>
-                        nextStatus !== appeal.statusId && canChangeStatus(user, appeal, nextStatus),
-                    )}
-                    onDragStart={() => setDraggedAppealId(appeal.id)}
-                    onDragEnd={() => setDraggedAppealId(null)}
-                  >
+                  <div key={appeal.id} className="board-card">
                     <button type="button" className="link-button" onClick={() => onOpenAppeal(appeal.id)}>
                       {appeal.title}
                     </button>

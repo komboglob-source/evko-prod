@@ -1,8 +1,10 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { ROLE_LABELS } from '../constants'
 import { CustomSelect } from '../components/CustomSelect'
 import type { Employee, UserProfile } from '../types'
-import { initials } from '../utils/format'
+import { formatDate, initials } from '../utils/format'
+import { readImageAsDataUrl } from '../utils/image'
+import { formatPhoneNumber } from '../utils/phone'
 import { canManageEmployees } from '../utils/permissions'
 
 interface EmployeesModuleProps {
@@ -36,22 +38,6 @@ function defaultEmployee(employees: Employee[]): Employee {
     passwordHash: '',
     hireDate: new Date().toISOString().slice(0, 10),
   }
-}
-
-function readImageAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result)
-        return
-      }
-
-      reject(new Error('Ошибка чтения изображения'))
-    }
-    reader.onerror = () => reject(new Error('Ошибка чтения изображения'))
-    reader.readAsDataURL(file)
-  })
 }
 
 function calculateAge(birthDate: string): number {
@@ -91,8 +77,11 @@ export function EmployeesModule({
   const [birthDateTo, setBirthDateTo] = useState('')
   const [hireDateFrom, setHireDateFrom] = useState('')
   const [hireDateTo, setHireDateTo] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const isSavingRef = useRef(false)
 
   const selectedEmployeeId = controlledSelectedEmployeeId ?? localSelectedEmployeeId
+  const today = new Date().toISOString().slice(0, 10)
 
   function selectEmployee(employeeId: string | null): void {
     onSelectEmployee?.(employeeId)
@@ -192,13 +181,23 @@ export function EmployeesModule({
   async function saveDraft(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!draft) {
+    if (!draft || isSavingRef.current) {
       return
     }
 
-    await onUpsertEmployee(draft)
-    selectEmployee(draft.accountId)
-    setDraft(null)
+    isSavingRef.current = true
+    setIsSaving(true)
+
+    try {
+      await onUpsertEmployee(draft)
+      selectEmployee(draft.accountId)
+      setDraft(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить сотрудника.')
+    } finally {
+      isSavingRef.current = false
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -231,22 +230,24 @@ export function EmployeesModule({
             />
           </label>
 
-          <label>
-            Роль
-            <CustomSelect
-              value={roleFilter}
-              onChange={(event) => setRoleFilter(event.target.value as Employee['role'] | '')}
-              options={[
-                { value: '', label: 'Все роли' },
-                { value: 'admin', label: 'Админ' },
-                { value: 'ktp', label: 'Оператор КТП' },
-                { value: 'wfm', label: 'Инженер WFM' },
-                { value: 'ebko', label: 'EBKO' },
-              ]}
-              placeholder={null}
-              showPlaceholder={false}
-            />
-          </label>
+          {isAdmin ? (
+            <label>
+              Роль
+              <CustomSelect
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value as Employee['role'] | '')}
+                options={[
+                  { value: '', label: 'Все роли' },
+                  { value: 'admin', label: 'Админ' },
+                  { value: 'ktp', label: 'Оператор КТП' },
+                  { value: 'wfm', label: 'Инженер WFM' },
+                  { value: 'ebko', label: 'EBKO' },
+                ]}
+                placeholder={null}
+                showPlaceholder={false}
+              />
+            </label>
+          ) : null}
 
           <label>
             ФИО
@@ -304,6 +305,7 @@ export function EmployeesModule({
               className="text-input"
               type="date"
               value={birthDateFrom}
+              max={today}
               onChange={(event) => setBirthDateFrom(event.target.value)}
             />
           </label>
@@ -314,6 +316,7 @@ export function EmployeesModule({
               className="text-input"
               type="date"
               value={birthDateTo}
+              max={today}
               onChange={(event) => setBirthDateTo(event.target.value)}
             />
           </label>
@@ -370,6 +373,7 @@ export function EmployeesModule({
                 className="text-input"
                 type="date"
                 value={draft.birthDate}
+                max={today}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
@@ -427,13 +431,15 @@ export function EmployeesModule({
               Телефон
               <input
                 className="text-input"
+                type="tel"
+                inputMode="tel"
                 value={draft.phoneNumber}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          phoneNumber: event.target.value,
+                          phoneNumber: formatPhoneNumber(event.target.value),
                         }
                       : previous,
                   )
@@ -527,26 +533,7 @@ export function EmployeesModule({
             </label>
 
             <label>
-              Фото (URL)
-              <input
-                className="text-input"
-                value={draft.image}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          image: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                placeholder="https://..."
-              />
-            </label>
-
-            <label>
-              Фото (файл)
+              Фото
               <input
                 className="text-input"
                 type="file"
@@ -557,32 +544,61 @@ export function EmployeesModule({
                     return
                   }
 
-                  void readImageAsDataUrl(imageFile).then((image) => {
-                    setDraft((previous) =>
-                      previous
-                        ? {
-                            ...previous,
-                            image,
-                          }
-                        : previous,
-                    )
-                  })
+                  void readImageAsDataUrl(imageFile)
+                    .then((image) => {
+                      setDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              image,
+                            }
+                          : previous,
+                      )
+                    })
+                    .catch((error: unknown) => {
+                      window.alert(
+                        error instanceof Error ? error.message : 'Не удалось загрузить изображение.',
+                      )
+                    })
                 }}
               />
             </label>
           </div>
 
           {draft.image ? (
-            <div className="photo-preview-wrap">
-              <img className="avatar-photo" src={draft.image} alt="Предпросмотр фото сотрудника" />
-            </div>
+            <>
+              <div className="photo-preview-wrap">
+                <img className="avatar-photo" src={draft.image} alt="Предпросмотр фото сотрудника" />
+              </div>
+              <button
+                type="button"
+                className="ghost-button button-sm"
+                onClick={() =>
+                  setDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          image: '',
+                        }
+                      : previous,
+                  )
+                }
+              >
+                Удалить фото
+              </button>
+            </>
           ) : null}
 
           <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
+            <button type="submit" className="primary-button button-sm" disabled={isSaving}>
+              {isSaving ? 'Сохранение...' : 'Сохранить'}
             </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
+            <button
+              type="button"
+              className="ghost-button button-sm"
+              onClick={() => setDraft(null)}
+              disabled={isSaving}
+            >
               Отмена
             </button>
           </div>
@@ -613,10 +629,15 @@ export function EmployeesModule({
                 <strong>Должность:</strong> {selectedEmployee.position}
               </p>
               <p>
+                <strong>Дата рождения:</strong>{' '}
+                {selectedEmployee.birthDate ? formatDate(selectedEmployee.birthDate) : 'Не задана'}
+              </p>
+              <p>
                 <strong>Возраст:</strong> {calculateAge(selectedEmployee.birthDate)}
               </p>
               <p>
-                <strong>Дата приема:</strong> {selectedEmployee.hireDate}
+                <strong>Дата приема:</strong>{' '}
+                {selectedEmployee.hireDate ? formatDate(selectedEmployee.hireDate) : 'Не задана'}
               </p>
               <p>
                 <strong>Телефон:</strong> {selectedEmployee.phoneNumber}

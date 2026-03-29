@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import type {
   ClientCompany,
   EquipmentType,
@@ -40,12 +40,11 @@ function nextSerialNumber(equipment: EquipmentUnit[]): string {
 function createEmptyEquipment(
   equipment: EquipmentUnit[],
   equipmentTypes: EquipmentType[],
-  sites: Site[],
 ): EquipmentUnit {
   return {
     id: nextEquipmentId(equipment),
     typeId: equipmentTypes[0]?.id ?? '',
-    siteId: sites[0]?.id,
+    siteId: undefined,
     serialNumber: nextSerialNumber(equipment),
     name: '',
     weight: 0,
@@ -68,6 +67,8 @@ export function EquipmentModule({
   const [search, setSearch] = useState('')
   const [clientFilter, setClientFilter] = useState('')
   const [productFilter, setProductFilter] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const isSavingRef = useRef(false)
 
   const canEdit = canEditEquipment(user)
 
@@ -150,19 +151,29 @@ export function EquipmentModule({
   async function saveEquipment(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!equipmentDraft) {
+    if (!equipmentDraft || isSavingRef.current) {
       return
     }
 
-    const safeDraft: EquipmentUnit = {
-      ...equipmentDraft,
-      weight: Math.max(0, Number(equipmentDraft.weight) || 0),
-      siteId: equipmentDraft.siteId || undefined,
-    }
+    isSavingRef.current = true
+    setIsSaving(true)
 
-    await onUpsertEquipment(safeDraft)
-    setSelectedEquipmentId(safeDraft.id)
-    setEquipmentDraft(null)
+    try {
+      const safeDraft: EquipmentUnit = {
+        ...equipmentDraft,
+        weight: Math.max(0, Number(equipmentDraft.weight) || 0),
+        siteId: equipmentDraft.siteId || undefined,
+      }
+
+      await onUpsertEquipment(safeDraft)
+      setSelectedEquipmentId(safeDraft.id)
+      setEquipmentDraft(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить оборудование.')
+    } finally {
+      isSavingRef.current = false
+      setIsSaving(false)
+    }
   }
 
   if (user.role === 'client') {
@@ -183,10 +194,9 @@ export function EquipmentModule({
             type="button"
             className="primary-button button-sm"
             onClick={() => {
-              setEquipmentDraft(createEmptyEquipment(equipment, equipmentTypes, sites))
+              setEquipmentDraft(createEmptyEquipment(equipment, equipmentTypes))
               setSelectedEquipmentId(null)
             }}
-            disabled={sites.length === 0}
           >
             Добавить оборудование
           </button>
@@ -345,6 +355,7 @@ export function EquipmentModule({
                   )
                 }
                 options={[
+                  { value: '', label: 'Не указана' },
                   ...sites.map((site) => ({
                     value: site.id,
                     label: `${site.name} (${site.address})`,
@@ -352,7 +363,6 @@ export function EquipmentModule({
                 ]}
                 placeholder={null}
                 showPlaceholder={false}
-                required
               />
             </label>
           </div>
@@ -377,13 +387,14 @@ export function EquipmentModule({
           </label>
 
           <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
+            <button type="submit" className="primary-button button-sm" disabled={isSaving}>
+              {isSaving ? 'Сохранение...' : 'Сохранить'}
             </button>
             <button
               type="button"
               className="ghost-button button-sm"
               onClick={() => setEquipmentDraft(null)}
+              disabled={isSaving}
             >
               Отмена
             </button>

@@ -21,6 +21,7 @@ import type {
   TicketStatus,
   TicketType,
 } from '../types'
+import { formatPhoneNumber } from '../utils/phone'
 import { createRandomId } from '../utils/random'
 import { API_BASE_URL, MOCK_NETWORK_DELAY_MS, USE_MOCK_DATA, wait } from './config'
 
@@ -238,9 +239,10 @@ function normalizeRepresentative(rawRepresentative: unknown): ClientRepresentati
     position:
       readOptionalStringValue(safeRepresentative.position) ??
       readStringValue(safeRepresentative.position, ''),
-    phoneNumber:
+    phoneNumber: formatPhoneNumber(
       readOptionalStringValue(safeRepresentative.phoneNumber) ??
-      readStringValue(safeRepresentative.phone_number, ''),
+        readStringValue(safeRepresentative.phone_number, ''),
+    ),
     email: readStringValue(safeRepresentative.email),
     login: readStringValue(safeRepresentative.login),
     passwordHash: readStringValue(safeRepresentative.passwordHash ?? safeRepresentative.password_hash),
@@ -320,9 +322,10 @@ function normalizeEmployee(rawEmployee: unknown): Employee {
     birthDate:
       readOptionalStringValue(safeEmployee.birthDate) ?? readStringValue(safeEmployee.birth_date, ''),
     position: readStringValue(safeEmployee.position),
-    phoneNumber:
+    phoneNumber: formatPhoneNumber(
       readOptionalStringValue(safeEmployee.phoneNumber) ??
-      readStringValue(safeEmployee.phone_number, ''),
+        readStringValue(safeEmployee.phone_number, ''),
+    ),
     email: readStringValue(safeEmployee.email),
     role: (readOptionalStringValue(safeEmployee.role) as Employee['role'] | undefined) ?? 'client',
     login: readStringValue(safeEmployee.login),
@@ -723,9 +726,12 @@ function serializeSitePayload(site: Site): Record<string, unknown> {
 }
 
 function serializeEquipmentPayload(equipment: EquipmentUnit): Record<string, unknown> {
+  const normalizedSiteId =
+    equipment.siteId === undefined || equipment.siteId === '' ? null : resolveNumericID(equipment.siteId)
+
   return {
     type_id: resolveNumericID(equipment.typeId),
-    site_id: resolveNumericID(equipment.siteId),
+    site_id: normalizedSiteId,
     serial_number: equipment.serialNumber.trim(),
     name: equipment.name.trim(),
     weight: String(Math.max(0, Number(equipment.weight) || 0)),

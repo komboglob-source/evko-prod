@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import {
   APPEAL_LINK_TYPE_LABELS,
   CRITICALITY_LABELS,
@@ -19,6 +19,7 @@ import type {
   UserProfile,
 } from '../types'
 import { formatDateTime, truncate } from '../utils/format'
+import { renderMarkdown } from '../utils/markdown'
 import {
   canChangeStatus,
   canCreateAppealType,
@@ -61,9 +62,7 @@ type CreateFormState = {
 }
 
 type EditFormState = {
-  title: string
   description: string
-  typeId: Appeal['typeId']
   statusId: AppealStatus
   criticalityId: AppealCriticality
   clientId: string
@@ -123,9 +122,7 @@ function defaultCreateState(
 
 function buildEditState(appeal: Appeal): EditFormState {
   return {
-    title: appeal.title,
     description: appeal.description,
-    typeId: appeal.typeId,
     statusId: appeal.statusId,
     criticalityId: appeal.criticalityId,
     clientId: appeal.clientId,
@@ -232,10 +229,13 @@ export function AppealsModule({
   const [productFilter, setProductFilter] = useState('')
   const [responsibleFilter, setResponsibleFilter] = useState('')
   const [createdByFilter, setCreatedByFilter] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+  const [isTakingInWork, setIsTakingInWork] = useState(false)
+  const isCreatingRef = useRef(false)
 
-  const visibleAppeals = appeals
-    .filter((appeal) => canViewAppeal(user, appeal))
-    .filter((appeal) => {
+  const viewableAppeals = appeals.filter((appeal) => canViewAppeal(user, appeal))
+
+  const visibleAppeals = viewableAppeals.filter((appeal) => {
       const normalizedQuery = appealQuery.trim().toLowerCase()
       const matchesQuery =
         !normalizedQuery ||
@@ -275,7 +275,7 @@ export function AppealsModule({
     })
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
 
-  const selectedAppeal = visibleAppeals.find((appeal) => appeal.id === selectedAppealId) ?? null
+  const selectedAppeal = viewableAppeals.find((appeal) => appeal.id === selectedAppealId) ?? null
   const selectedAppealLinks = selectedAppeal ? getAppealLinks(selectedAppeal) : []
   const selectedClientSites = sites.filter((site) => site.clientId === createState.clientId)
   const selectedCreateProducts = getAvailableProducts(products, sites, createState.siteId)
@@ -283,7 +283,7 @@ export function AppealsModule({
   const editProducts = editState ? getAvailableProducts(products, sites, editState.siteId) : products
 
   const availableLinkTargets = selectedAppeal
-    ? visibleAppeals.filter(
+    ? viewableAppeals.filter(
         (appeal) =>
           appeal.id !== selectedAppeal.id &&
           !selectedAppealLinks.some((link) => link.linkedAppealId === appeal.id),
@@ -344,37 +344,47 @@ export function AppealsModule({
   async function handleCreate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!canCreateAppealType(user, createState.typeId)) {
+    if (!canCreateAppealType(user, createState.typeId) || isCreatingRef.current) {
       return
     }
 
-    const now = new Date().toISOString()
-    const clientId = user.role === 'client' ? user.clientId ?? createState.clientId : createState.clientId
-    const selectedSite =
-      sites.find((site) => site.id === createState.siteId && site.clientId === clientId) ?? null
+    isCreatingRef.current = true
+    setIsCreating(true)
 
-    const draft: Omit<Appeal, 'id'> = {
-      title: nextAppealTitle(createState.typeId, appeals),
-      description: createState.description,
-      typeId: createState.typeId,
-      statusId: 'Created',
-      criticalityId: createState.criticalityId,
-      productId: createState.productId || selectedSite?.productIds[0],
-      clientId,
-      siteId: createState.siteId || undefined,
-      responsibleId: undefined,
-      createdBy: user.id,
-      updatedBy: user.id,
-      createdAt: now,
-      updatedAt: now,
-      linkedTicketIds: [],
-      links: [],
-      comments: [],
+    try {
+      const now = new Date().toISOString()
+      const clientId = user.role === 'client' ? user.clientId ?? createState.clientId : createState.clientId
+      const selectedSite =
+        sites.find((site) => site.id === createState.siteId && site.clientId === clientId) ?? null
+
+      const draft: Omit<Appeal, 'id'> = {
+        title: nextAppealTitle(createState.typeId, appeals),
+        description: createState.description,
+        typeId: createState.typeId,
+        statusId: 'Created',
+        criticalityId: createState.criticalityId,
+        productId: createState.productId || selectedSite?.productIds[0],
+        clientId,
+        siteId: createState.siteId || undefined,
+        responsibleId: undefined,
+        createdBy: user.id,
+        updatedBy: user.id,
+        createdAt: now,
+        updatedAt: now,
+        linkedTicketIds: [],
+        links: [],
+        comments: [],
+      }
+
+      await onCreateAppeal(draft)
+      setCreateState(defaultCreateState(user, clients, sites, products))
+      setIsCreateOpen(false)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось создать обращение.')
+    } finally {
+      isCreatingRef.current = false
+      setIsCreating(false)
     }
-
-    await onCreateAppeal(draft)
-    setCreateState(defaultCreateState(user, clients, sites, products))
-    setIsCreateOpen(false)
   }
 
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -385,9 +395,7 @@ export function AppealsModule({
     }
 
     await onUpdateAppeal(selectedAppeal.id, {
-      title: editState.title,
       description: editState.description,
-      typeId: editState.typeId,
       statusId: editState.statusId,
       criticalityId: editState.criticalityId,
       clientId: editState.clientId,
@@ -404,7 +412,7 @@ export function AppealsModule({
   async function handleCommentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!selectedAppeal || !commentText.trim()) {
+    if (!selectedAppeal || selectedAppeal.statusId === 'Verified' || !commentText.trim()) {
       return
     }
 
@@ -430,18 +438,51 @@ export function AppealsModule({
     await onUnlinkAppeal(selectedAppeal.id, linkedId)
   }
 
+  async function handleTakeAppealInWork(): Promise<void> {
+    if (!selectedAppeal) {
+      return
+    }
+
+    setIsTakingInWork(true)
+    try {
+      await onUpdateAppeal(selectedAppeal.id, {
+        statusId: 'Opened',
+        responsibleId: user.id,
+        updatedAt: new Date().toISOString(),
+        updatedBy: user.id,
+      })
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось взять заявку в работу.')
+    } finally {
+      setIsTakingInWork(false)
+    }
+  }
+
   if (selectedAppeal) {
+    const isVerified = selectedAppeal.statusId === 'Verified'
     const canEdit = canEditAppeal(user, selectedAppeal)
     const canLink = canLinkAppeals(user)
+    const canManageLinks = canLink && !isVerified
+    const canComment = !isVerified
+    const canTakeInWork =
+      selectedAppeal.statusId === 'Created' &&
+      user.role !== 'client' &&
+      canChangeStatus(user, selectedAppeal, 'Opened')
     const linkedAppeals = selectedAppealLinks
       .map((link) => ({
         link,
-        appeal: visibleAppeals.find((item) => item.id === link.linkedAppealId) ?? null,
+        appeal: viewableAppeals.find((item) => item.id === link.linkedAppealId) ?? null,
       }))
       .filter((item): item is { link: NonNullable<typeof item.link>; appeal: Appeal } => Boolean(item.appeal))
+    const hasIncompleteSubtasks = linkedAppeals.some(
+      ({ link, appeal }) =>
+        link.relationType === 'parent_for' &&
+        appeal.statusId !== 'Done' &&
+        appeal.statusId !== 'Verified',
+    )
     const responsibleCandidates = getResponsibleCandidates(
       employees,
-      editState?.typeId ?? selectedAppeal.typeId,
+      selectedAppeal.typeId,
       editState?.responsibleId || selectedAppeal.responsibleId,
     )
 
@@ -456,14 +497,22 @@ export function AppealsModule({
 
         <div className="appeal-detail-grid">
           <article className="detail-main">
-            <p className="meta">{selectedAppeal.typeId === 'KTP' ? 'Тикет КТП' : 'Наряд WFM'}</p>
-            <h2>{selectedAppeal.title}</h2>
+            <p className="meta appeal-detail-type">
+              {selectedAppeal.typeId === 'KTP' ? 'Тикет КТП' : 'Наряд WFM'}
+            </p>
+            <h2 className="appeal-detail-title">{selectedAppeal.title}</h2>
             <p className="description-full">{selectedAppeal.description}</p>
+
+            {isVerified ? (
+              <div className="readonly-banner">
+                Задача проверена. Редактирование, комментарии и изменение связей заблокированы.
+              </div>
+            ) : null}
 
             <div className="linked-block">
               <div className="section-head-row">
                 <h3>Связанные обращения</h3>
-                {canLink ? (
+                {canManageLinks ? (
                   <div className="link-control-row compact">
                     <CustomSelect
                       value={linkedAppealType}
@@ -521,7 +570,7 @@ export function AppealsModule({
                         >
                           Открыть
                         </button>
-                        {canLink ? (
+                        {canManageLinks ? (
                           <button
                             type="button"
                             className="danger-button button-sm"
@@ -544,13 +593,32 @@ export function AppealsModule({
             <div className="comments-block">
               <h3>Комментарии</h3>
 
+              {canComment ? (
+                <form className="comment-form" onSubmit={handleCommentSubmit}>
+                  <h4>Новый комментарий</h4>
+                  <textarea
+                    className="text-input text-area"
+                    value={commentText}
+                    onChange={(event) => setCommentText(event.target.value)}
+                    placeholder="Поддерживается Markdown-разметка"
+                    rows={5}
+                    required
+                  />
+                  <button type="submit" className="primary-button button-sm">
+                    Отправить комментарий
+                  </button>
+                </form>
+              ) : (
+                <p className="empty-inline">Комментарии для проверенной задачи заблокированы.</p>
+              )}
+
               <div className="comment-list">
                 {selectedAppeal.comments.length > 0 ? (
                   selectedAppeal.comments
                     .slice()
                     .sort(
                       (left, right) =>
-                        new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+                        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
                     )
                     .map((comment) => (
                       <div key={comment.id} className="comment-card">
@@ -564,28 +632,13 @@ export function AppealsModule({
                           </button>
                           <span>{formatDateTime(comment.createdAt)}</span>
                         </div>
-                        <p>{comment.contents}</p>
+                        <div className="markdown-content">{renderMarkdown(comment.contents)}</div>
                       </div>
                     ))
                 ) : (
                   <p className="empty-inline">Комментариев пока нет.</p>
                 )}
               </div>
-
-              <form className="comment-form" onSubmit={handleCommentSubmit}>
-                <h4>Новый комментарий</h4>
-                <textarea
-                  className="text-input text-area"
-                  value={commentText}
-                  onChange={(event) => setCommentText(event.target.value)}
-                  placeholder="Поддерживается Markdown-разметка"
-                  rows={5}
-                  required
-                />
-                <button type="submit" className="primary-button button-sm">
-                  Отправить комментарий
-                </button>
-              </form>
             </div>
           </article>
 
@@ -595,49 +648,6 @@ export function AppealsModule({
                 <h3>Редактирование обращения</h3>
 
                 <div className="form-grid">
-                  <label>
-                    Заголовок
-                    <input
-                      className="text-input"
-                      value={editState.title}
-                      onChange={(event) =>
-                        setEditState((previous) =>
-                          previous
-                            ? {
-                                ...previous,
-                                title: event.target.value,
-                              }
-                            : previous,
-                        )
-                      }
-                      required
-                    />
-                  </label>
-
-                  <label>
-                    Тип
-                    <CustomSelect
-                      value={editState.typeId}
-                      onChange={(event) =>
-                        setEditState((previous) =>
-                          previous
-                            ? {
-                                ...previous,
-                                typeId: event.target.value as Appeal['typeId'],
-                                responsibleId: '',
-                              }
-                            : previous,
-                        )
-                      }
-                      options={[
-                        { value: 'KTP', label: 'КТП', disabled: !canCreateAppealType(user, 'KTP') },
-                        { value: 'WFM', label: 'WFM', disabled: !canCreateAppealType(user, 'WFM') },
-                      ]}
-                      placeholder={null}
-                      showPlaceholder={false}
-                    />
-                  </label>
-
                   <label>
                     Статус
                     <CustomSelect
@@ -657,7 +667,8 @@ export function AppealsModule({
                         label: STATUS_LABELS[status],
                         disabled:
                           status !== selectedAppeal.statusId &&
-                          !canChangeStatus(user, selectedAppeal, status),
+                          (!canChangeStatus(user, selectedAppeal, status) ||
+                            ((status === 'Done' || status === 'Verified') && hasIncompleteSubtasks)),
                       }))}
                       placeholder={null}
                       showPlaceholder={false}
@@ -774,6 +785,10 @@ export function AppealsModule({
                             ? {
                                 ...previous,
                                 responsibleId: event.target.value,
+                                statusId:
+                                  previous.statusId === 'Created' && event.target.value
+                                    ? 'Opened'
+                                    : previous.statusId,
                               }
                             : previous,
                         )
@@ -810,6 +825,13 @@ export function AppealsModule({
                     required
                   />
                 </label>
+
+                {hasIncompleteSubtasks ? (
+                  <p className="empty-inline">
+                    Родительскую задачу нельзя перевести в статусы «Выполнено» или «Проверено»,
+                    пока есть незавершенные подзадачи.
+                  </p>
+                ) : null}
 
                 <div className="section-head-row">
                   <button type="submit" className="primary-button button-sm">
@@ -909,6 +931,21 @@ export function AppealsModule({
                   <span>Обновлено</span>
                   <strong>{formatDateTime(selectedAppeal.updatedAt)}</strong>
                 </div>
+
+                {canTakeInWork ? (
+                  <div className="section-head-row">
+                    <button
+                      type="button"
+                      className="primary-button button-sm"
+                      onClick={() => {
+                        void handleTakeAppealInWork()
+                      }}
+                      disabled={isTakingInWork}
+                    >
+                      {isTakingInWork ? 'Берем в работу...' : 'Взять в работу'}
+                    </button>
+                  </div>
+                ) : null}
 
                 {canEdit ? (
                   <div className="section-head-row">
@@ -1072,8 +1109,8 @@ export function AppealsModule({
             />
           </label>
 
-          <button className="primary-button button-sm" type="submit">
-            Сохранить
+          <button className="primary-button button-sm" type="submit" disabled={isCreating}>
+            {isCreating ? 'Сохранение...' : 'Сохранить'}
           </button>
         </form>
       ) : null}
@@ -1255,10 +1292,10 @@ export function AppealsModule({
               onClick={() => selectAppeal(appeal.id)}
             >
               <div className="card-row">
-                <strong>{appeal.title}</strong>
+                <strong className="appeal-card-title">{appeal.title}</strong>
                 <span>{STATUS_LABELS[appeal.statusId]}</span>
               </div>
-              <h3>{appeal.typeId === 'KTP' ? 'КТП' : 'WFM'}</h3>
+              <p className="appeal-card-type">{appeal.typeId === 'KTP' ? 'КТП' : 'WFM'}</p>
               <p>{truncate(appeal.description, 100)}</p>
               <div className="card-row muted">
                 <span>Ответственный: {resolveEmployeeName(appeal.responsibleId)}</span>

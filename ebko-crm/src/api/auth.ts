@@ -1,5 +1,6 @@
 import { findMockUserByCredentials } from '../mockData'
 import type { AuthTokens, LoginPayload, LoginResult, RefreshPayload, UserProfile } from '../types'
+import { formatPhoneNumber } from '../utils/phone'
 import { createRandomTokenFragment } from '../utils/random'
 import { API_BASE_URL, MOCK_NETWORK_DELAY_MS, USE_MOCK_DATA, wait } from './config'
 
@@ -65,10 +66,12 @@ function parseProfile(payload: unknown): UserProfile | null {
     role: safeUser.role as UserProfile['role'],
     position: readStringValue(safeUser.position) ?? 'Пользователь CRM',
     phoneNumber:
-      readStringValue(safeUser.phoneNumber) ??
-      readStringValue(safeUser.phone_number) ??
-      readStringValue(safeUser.phone) ??
-      '-',
+      formatPhoneNumber(
+        readStringValue(safeUser.phoneNumber) ??
+          readStringValue(safeUser.phone_number) ??
+          readStringValue(safeUser.phone) ??
+          '',
+      ) || '-',
     email: readStringValue(safeUser.email) ?? '-',
     image: readStringValue(safeUser.image) ?? readStringValue(safeUser.photoUrl) ?? '',
     login: readStringValue(safeUser.login) ?? id,
@@ -89,7 +92,36 @@ function parseUser(payload: unknown): UserProfile | null {
   return parseProfile(safePayload.user)
 }
 
-async function loadCurrentProfile(tokens: AuthTokens): Promise<UserProfile | null> {
+function withOptionalProfileString(
+  body: Record<string, unknown>,
+  key: string,
+  value: string | undefined,
+): void {
+  if (value === undefined) {
+    return
+  }
+
+  if (key === 'image') {
+    body[key] = value
+    return
+  }
+
+  body[key] = value.trim()
+}
+
+function serializeProfilePatch(patch: Partial<UserProfile>): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+
+  withOptionalProfileString(body, 'full_name', patch.fullName)
+  withOptionalProfileString(body, 'phone_number', patch.phoneNumber)
+  withOptionalProfileString(body, 'email', patch.email)
+  withOptionalProfileString(body, 'image', patch.image)
+  withOptionalProfileString(body, 'position', patch.position)
+
+  return body
+}
+
+export async function loadCurrentProfile(tokens: AuthTokens): Promise<UserProfile | null> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me`, {
       method: 'GET',
@@ -106,6 +138,31 @@ async function loadCurrentProfile(tokens: AuthTokens): Promise<UserProfile | nul
   } catch {
     return null
   }
+}
+
+export async function syncCurrentProfile(
+  tokens: AuthTokens,
+  patch: Partial<UserProfile>,
+): Promise<UserProfile> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${tokens.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(serializeProfilePatch(patch)),
+  })
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status)
+  }
+
+  const profile = parseProfile((await response.json()) as unknown)
+  if (!profile) {
+    throw new ApiError('Сервер вернул некорректные данные профиля.', 500)
+  }
+
+  return profile
 }
 
 function generateMockTokens(): AuthTokens {

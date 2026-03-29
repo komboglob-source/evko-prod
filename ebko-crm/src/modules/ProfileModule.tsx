@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ROLE_LABELS } from '../constants'
 import type { UserProfile } from '../types'
 import { initials } from '../utils/format'
+import { readImageAsDataUrl } from '../utils/image'
+import { formatPhoneNumber } from '../utils/phone'
 
 interface ProfileModuleProps {
   user: UserProfile
@@ -13,6 +15,7 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
   const [position, setPosition] = useState(user.position)
   const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber)
   const [email, setEmail] = useState(user.email)
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
     setImage(user.image)
@@ -47,12 +50,24 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
           className="inline-form compact"
           onSubmit={(event) => {
             event.preventDefault()
+            setIsSaving(true)
+
             void onUpdateProfile({
               image,
               position,
               phoneNumber,
               email,
             })
+              .catch((error: unknown) => {
+                window.alert(
+                  error instanceof Error
+                    ? error.message
+                    : 'Не удалось сохранить изменения профиля.',
+                )
+              })
+              .finally(() => {
+                setIsSaving(false)
+              })
           }}
         >
           <div className="form-grid">
@@ -69,8 +84,10 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
               Телефон
               <input
                 className="text-input"
+                type="tel"
+                inputMode="tel"
                 value={phoneNumber}
-                onChange={(event) => setPhoneNumber(event.target.value)}
+                onChange={(event) => setPhoneNumber(formatPhoneNumber(event.target.value))}
               />
             </label>
 
@@ -85,18 +102,41 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
             </label>
 
             <label>
-              URL фотографии
+              Фото
               <input
                 className="text-input"
-                value={image}
-                onChange={(event) => setImage(event.target.value)}
-                placeholder="https://..."
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const imageFile = event.target.files?.[0]
+                  if (!imageFile) {
+                    return
+                  }
+
+                  void readImageAsDataUrl(imageFile)
+                    .then((nextImage) => {
+                      setImage(nextImage)
+                    })
+                    .catch((error: unknown) => {
+                      window.alert(
+                        error instanceof Error
+                          ? error.message
+                          : 'Не удалось загрузить изображение.',
+                      )
+                    })
+                }}
               />
             </label>
           </div>
 
-          <button type="submit" className="primary-button button-sm">
-            Сохранить профиль
+          {image ? (
+            <button type="button" className="ghost-button button-sm" onClick={() => setImage('')}>
+              Удалить фото
+            </button>
+          ) : null}
+
+          <button type="submit" className="primary-button button-sm" disabled={isSaving}>
+            {isSaving ? 'Сохранение...' : 'Сохранить профиль'}
           </button>
         </form>
       </article>

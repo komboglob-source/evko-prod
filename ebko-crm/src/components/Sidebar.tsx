@@ -49,7 +49,11 @@ export function Sidebar({ user, activeModule, onModuleChange, onLogout }: Sideba
 
       <div className="sidebar-footer">
         <div className="profile-badge">
-          <div className="profile-avatar">{initials(user.fullName)}</div>
+          {user.image ? (
+            <img className="avatar-photo avatar-photo-sm" src={user.image} alt={user.fullName} />
+          ) : (
+            <div className="profile-avatar">{initials(user.fullName)}</div>
+          )}
           <div>
             <p className="profile-name">{user.fullName}</p>
             <p className="profile-role">{ROLE_LABELS[user.role]}</p>
@@ -57,7 +61,7 @@ export function Sidebar({ user, activeModule, onModuleChange, onLogout }: Sideba
         </div>
 
         <button type="button" className="logout-button" onClick={onLogout}>
-          Log out
+          Выйти
         </button>
       </div>
     </aside>

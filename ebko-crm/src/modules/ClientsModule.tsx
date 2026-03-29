@@ -1,7 +1,9 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import type { ClientCompany, ClientRepresentative, UserProfile } from '../types'
 import { canManageRepresentatives, canViewRepresentative } from '../utils/permissions'
 import { CustomSelect } from '../components/CustomSelect'
+import { formatDate } from '../utils/format'
+import { formatPhoneNumber } from '../utils/phone'
 
 interface ClientsModuleProps {
   user: UserProfile
@@ -75,8 +77,11 @@ export function ClientsModule({
   const [phoneFilter, setPhoneFilter] = useState('')
   const [birthDateFrom, setBirthDateFrom] = useState('')
   const [birthDateTo, setBirthDateTo] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const isSavingRef = useRef(false)
 
   const selectedRecordKey = controlledSelectedRecordKey ?? localSelectedRecordKey
+  const today = new Date().toISOString().slice(0, 10)
 
   function selectRecord(nextRecordKey: string | null): void {
     onSelectRecord?.(nextRecordKey)
@@ -171,18 +176,28 @@ export function ClientsModule({
   async function saveDraft(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!draft) {
+    if (!draft || isSavingRef.current) {
       return
     }
 
-    const safeRepresentative = {
-      ...draft.representative,
-      clientId: draft.customerId,
-    }
+    isSavingRef.current = true
+    setIsSaving(true)
 
-    await onUpsertRepresentative(draft.customerId, safeRepresentative)
-    selectRecord(recordKey(draft.customerId, safeRepresentative.accountId))
-    setDraft(null)
+    try {
+      const safeRepresentative = {
+        ...draft.representative,
+        clientId: draft.customerId,
+      }
+
+      await onUpsertRepresentative(draft.customerId, safeRepresentative)
+      selectRecord(recordKey(draft.customerId, safeRepresentative.accountId))
+      setDraft(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить представителя.')
+    } finally {
+      isSavingRef.current = false
+      setIsSaving(false)
+    }
   }
 
   if (!draft && !selectedRecord && visibleRecords.length === 0) {
@@ -302,6 +317,7 @@ export function ClientsModule({
               className="text-input"
               type="date"
               value={birthDateFrom}
+              max={today}
               onChange={(event) => setBirthDateFrom(event.target.value)}
             />
           </label>
@@ -312,6 +328,7 @@ export function ClientsModule({
               className="text-input"
               type="date"
               value={birthDateTo}
+              max={today}
               onChange={(event) => setBirthDateTo(event.target.value)}
             />
           </label>
@@ -377,6 +394,8 @@ export function ClientsModule({
               Телефон
               <input
                 className="text-input"
+                type="tel"
+                inputMode="tel"
                 value={draft.representative.phoneNumber}
                 onChange={(event) =>
                   setDraft((previous) =>
@@ -385,7 +404,7 @@ export function ClientsModule({
                           ...previous,
                           representative: {
                             ...previous.representative,
-                            phoneNumber: event.target.value,
+                            phoneNumber: formatPhoneNumber(event.target.value),
                           },
                         }
                       : previous,
@@ -401,6 +420,7 @@ export function ClientsModule({
                 className="text-input"
                 type="date"
                 value={draft.representative.birthDate}
+                max={today}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
@@ -509,10 +529,15 @@ export function ClientsModule({
           </div>
 
           <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
+            <button type="submit" className="primary-button button-sm" disabled={isSaving}>
+              {isSaving ? 'Сохранение...' : 'Сохранить'}
             </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
+            <button
+              type="button"
+              className="ghost-button button-sm"
+              onClick={() => setDraft(null)}
+              disabled={isSaving}
+            >
               Отмена
             </button>
           </div>
@@ -550,7 +575,10 @@ export function ClientsModule({
                 <strong>Должность:</strong> {selectedRecord.representative.position || 'Не задана'}
               </p>
               <p>
-                <strong>Дата рождения:</strong> {selectedRecord.representative.birthDate || 'Не задана'}
+                <strong>Дата рождения:</strong>{' '}
+                {selectedRecord.representative.birthDate
+                  ? formatDate(selectedRecord.representative.birthDate)
+                  : 'Не задана'}
               </p>
               <p>
                 <strong>Логин:</strong> {selectedRecord.representative.login}

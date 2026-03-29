@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import type {
   ClientCompany,
   EquipmentType,
@@ -101,6 +101,10 @@ export function CustomersModule({
   const [addressFilter, setAddressFilter] = useState('')
   const [representativeQuery, setRepresentativeQuery] = useState('')
   const [productFilter, setProductFilter] = useState('')
+  const [isCustomerSaving, setIsCustomerSaving] = useState(false)
+  const [isSiteSaving, setIsSiteSaving] = useState(false)
+  const isCustomerSavingRef = useRef(false)
+  const isSiteSavingRef = useRef(false)
 
   const canEditCustomers = canManageCustomers(user)
   const canEditSites = canManageCustomerSites(user)
@@ -159,7 +163,7 @@ export function CustomersModule({
     : []
 
   const availableEquipmentToAttach = selectedSite
-    ? equipment.filter((item) => item.siteId !== selectedSite.id)
+    ? equipment.filter((item) => !item.siteId)
     : []
 
   function resolveEquipmentTypeName(typeId: string): string {
@@ -187,25 +191,45 @@ export function CustomersModule({
 
   async function saveCustomer(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    if (!customerDraft) {
+    if (!customerDraft || isCustomerSavingRef.current) {
       return
     }
 
-    await onUpsertCustomer(customerDraft)
-    onSelectCustomer(customerDraft.id)
-    setCustomerDraft(null)
+    isCustomerSavingRef.current = true
+    setIsCustomerSaving(true)
+
+    try {
+      await onUpsertCustomer(customerDraft)
+      onSelectCustomer(customerDraft.id)
+      setCustomerDraft(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить заказчика.')
+    } finally {
+      isCustomerSavingRef.current = false
+      setIsCustomerSaving(false)
+    }
   }
 
   async function saveSite(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    if (!siteDraft) {
+    if (!siteDraft || isSiteSavingRef.current) {
       return
     }
 
-    await onUpsertSite(siteDraft)
-    onSelectCustomer(siteDraft.clientId)
-    onSelectSite(siteDraft.id)
-    setSiteDraft(null)
+    isSiteSavingRef.current = true
+    setIsSiteSaving(true)
+
+    try {
+      await onUpsertSite(siteDraft)
+      onSelectCustomer(siteDraft.clientId)
+      onSelectSite(siteDraft.id)
+      setSiteDraft(null)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить площадку.')
+    } finally {
+      isSiteSavingRef.current = false
+      setIsSiteSaving(false)
+    }
   }
 
   if (visibleCustomers.length === 0 && !canEditCustomers) {
@@ -358,10 +382,15 @@ export function CustomersModule({
           </div>
 
           <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
+            <button type="submit" className="primary-button button-sm" disabled={isCustomerSaving}>
+              {isCustomerSaving ? 'Сохранение...' : 'Сохранить'}
             </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setCustomerDraft(null)}>
+            <button
+              type="button"
+              className="ghost-button button-sm"
+              onClick={() => setCustomerDraft(null)}
+              disabled={isCustomerSaving}
+            >
               Отмена
             </button>
           </div>
@@ -493,10 +522,15 @@ export function CustomersModule({
           </div>
 
           <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
+            <button type="submit" className="primary-button button-sm" disabled={isSiteSaving}>
+              {isSiteSaving ? 'Сохранение...' : 'Сохранить'}
             </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setSiteDraft(null)}>
+            <button
+              type="button"
+              className="ghost-button button-sm"
+              onClick={() => setSiteDraft(null)}
+              disabled={isSiteSaving}
+            >
               Отмена
             </button>
           </div>

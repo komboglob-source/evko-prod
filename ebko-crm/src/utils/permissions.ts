@@ -26,6 +26,10 @@ export function canViewAppeal(user: UserProfile, appeal: Appeal): boolean {
 }
 
 export function canEditAppeal(user: UserProfile, appeal: Appeal): boolean {
+  if (appeal.statusId === 'Verified') {
+    return false
+  }
+
   const isResponsible = appeal.responsibleId === user.id
   const isAuthor = appeal.createdBy === user.id
 
@@ -69,6 +73,10 @@ export function canChangeStatus(
   appeal: Appeal,
   nextStatus: AppealStatus,
 ): boolean {
+  if (appeal.statusId === 'Verified') {
+    return false
+  }
+
   if (!canEditAppeal(user, appeal)) {
     return false
   }
