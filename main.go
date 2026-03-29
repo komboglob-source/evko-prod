@@ -59,6 +59,9 @@ type Router struct{}
 func (*Router) RouterFunc(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
+	case path == "/healthz":
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
 	case utils.StartsWith(path, "/api/v1"):
 		HandleAPIRequest(w, r, path[len("/api/v1"):])
 	default:

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	reprezentatives "crm_be/api/crm/reprezentatives"
 	"crm_be/api/utils"
@@ -36,6 +37,22 @@ type upsertClientRequest struct {
 	Name    *string `json:"name"`
 	Address *string `json:"address"`
 	CEOID   *int64  `json:"ceo_id"`
+}
+
+type clientListFilters struct {
+	ID                      *int64
+	Name                    string
+	Address                 string
+	CEOID                   *int64
+	RepresentativeAccountID *int64
+	RepresentativeLogin     string
+	RepresentativeFullName  string
+	RepresentativePhone     string
+	RepresentativeEmail     string
+	RepresentativePosition  string
+	RepresentativeBirthFrom *time.Time
+	RepresentativeBirthTo   *time.Time
+	Query                   string
 }
 
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -79,7 +96,13 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func ListClientsHandler(w http.ResponseWriter, r *http.Request) {
-	items, err := listClients()
+	filters, err := readClientListFilters(r)
+	if err != nil {
+		http.Error(w, "invalid query parameters", http.StatusBadRequest)
+		return
+	}
+
+	items, err := listClients(filters)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -213,23 +236,26 @@ func DeleteClientHandler(w http.ResponseWriter, r *http.Request, clientID int64)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func listClients() ([]clientResponse, error) {
+func listClients(filters clientListFilters) ([]clientResponse, error) {
 	rows, err := database.DB.Query(`
-		SELECT id, name, address, ceo_id
-		FROM "crm"."Clients"
-		ORDER BY name, id
-	`)
+		SELECT DISTINCT
+			clients.id,
+			clients.name,
+			clients.address,
+			clients.ceo_id
+		FROM "crm"."Clients" clients
+		LEFT JOIN "crm"."Representatives" representatives ON representatives.client_id = clients.id
+		LEFT JOIN "auth"."Accounts" accounts ON accounts.id = representatives.account_id
+		LEFT JOIN "profiles"."Profiles" profiles ON profiles.account_id = representatives.account_id
+		WHERE 1 = 1
+	`+buildClientFilterSQL(filters), buildClientFilterArgs(filters)...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	representativesByClient, err := listRepresentativesByClientID()
-	if err != nil {
-		return nil, err
-	}
-
 	items := make([]clientResponse, 0)
+	clientIDs := make([]int64, 0)
 	for rows.Next() {
 		var (
 			item  clientResponse
@@ -242,14 +268,25 @@ func listClients() ([]clientResponse, error) {
 			value := ceoID.Int64
 			item.CEOID = &value
 		}
-		item.Representatives = representativesByClient[item.ID]
-		if item.Representatives == nil {
-			item.Representatives = make([]representativeResponse, 0)
-		}
 		items = append(items, item)
+		clientIDs = append(clientIDs, item.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
-	return items, rows.Err()
+	representativesByClient, err := listRepresentativesByClientID(clientIDs)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].Representatives = representativesByClient[items[index].ID]
+		if items[index].Representatives == nil {
+			items[index].Representatives = make([]representativeResponse, 0)
+		}
+	}
+
+	return items, nil
 }
 
 func getClientByID(clientID int64) (clientResponse, error) {
@@ -272,7 +309,7 @@ func getClientByID(clientID int64) (clientResponse, error) {
 		item.CEOID = &value
 	}
 
-	representativesByClient, err := listRepresentativesByClientID()
+	representativesByClient, err := listRepresentativesByClientID([]int64{item.ID})
 	if err != nil {
 		return clientResponse{}, err
 	}
@@ -284,7 +321,19 @@ func getClientByID(clientID int64) (clientResponse, error) {
 	return item, nil
 }
 
-func listRepresentativesByClientID() (map[int64][]representativeResponse, error) {
+func listRepresentativesByClientID(clientIDs []int64) (map[int64][]representativeResponse, error) {
+	items := make(map[int64][]representativeResponse)
+	if len(clientIDs) == 0 {
+		return items, nil
+	}
+
+	args := make([]any, 0, len(clientIDs))
+	placeholders := make([]string, 0, len(clientIDs))
+	for index, clientID := range clientIDs {
+		args = append(args, clientID)
+		placeholders = append(placeholders, "$"+strconv.Itoa(index+1))
+	}
+
 	rows, err := database.DB.Query(`
 		SELECT
 			representatives.client_id,
@@ -301,14 +350,14 @@ func listRepresentativesByClientID() (map[int64][]representativeResponse, error)
 		JOIN "auth"."Accounts" accounts ON accounts.id = representatives.account_id
 		JOIN "auth"."Roles" roles ON roles.id = accounts.role_id
 		JOIN "profiles"."Profiles" profiles ON profiles.account_id = representatives.account_id
+		WHERE representatives.client_id IN (`+strings.Join(placeholders, ", ")+`)
 		ORDER BY representatives.client_id, profiles.full_name, accounts.id
-	`)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	items := make(map[int64][]representativeResponse)
 	for rows.Next() {
 		var (
 			clientID  int64
@@ -342,4 +391,164 @@ func listRepresentativesByClientID() (map[int64][]representativeResponse, error)
 	}
 
 	return items, rows.Err()
+}
+
+func readClientListFilters(r *http.Request) (clientListFilters, error) {
+	var filters clientListFilters
+
+	parseInt64 := func(raw string) (*int64, error) {
+		if strings.TrimSpace(raw) == "" {
+			return nil, nil
+		}
+		value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return &value, nil
+	}
+	parseDate := func(raw string) (*time.Time, error) {
+		if strings.TrimSpace(raw) == "" {
+			return nil, nil
+		}
+		value, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
+		if err != nil {
+			return nil, err
+		}
+		return &value, nil
+	}
+
+	var err error
+	if filters.ID, err = parseInt64(r.URL.Query().Get("id")); err != nil {
+		return clientListFilters{}, err
+	}
+	if filters.CEOID, err = parseInt64(r.URL.Query().Get("ceo_id")); err != nil {
+		return clientListFilters{}, err
+	}
+	if filters.RepresentativeAccountID, err = parseInt64(r.URL.Query().Get("representative_account_id")); err != nil {
+		return clientListFilters{}, err
+	}
+	if filters.RepresentativeBirthFrom, err = parseDate(r.URL.Query().Get("representative_birth_date_from")); err != nil {
+		return clientListFilters{}, err
+	}
+	if filters.RepresentativeBirthTo, err = parseDate(r.URL.Query().Get("representative_birth_date_to")); err != nil {
+		return clientListFilters{}, err
+	}
+
+	filters.Name = strings.TrimSpace(r.URL.Query().Get("name"))
+	filters.Address = strings.TrimSpace(r.URL.Query().Get("address"))
+	filters.RepresentativeLogin = strings.TrimSpace(r.URL.Query().Get("representative_login"))
+	filters.RepresentativeFullName = strings.TrimSpace(r.URL.Query().Get("representative_full_name"))
+	filters.RepresentativePhone = strings.TrimSpace(r.URL.Query().Get("representative_phone_number"))
+	filters.RepresentativeEmail = strings.TrimSpace(r.URL.Query().Get("representative_email"))
+	filters.RepresentativePosition = strings.TrimSpace(r.URL.Query().Get("representative_position"))
+	filters.Query = strings.TrimSpace(r.URL.Query().Get("q"))
+
+	return filters, nil
+}
+
+func buildClientFilterSQL(filters clientListFilters) string {
+	clauses := make([]string, 0)
+	nextPlaceholder := 1
+	addClause := func(sql string) {
+		clauses = append(clauses, sql)
+		nextPlaceholder++
+	}
+
+	if filters.ID != nil {
+		addClause(`clients.id = $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.Name != "" {
+		addClause(`clients.name ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.Address != "" {
+		addClause(`clients.address ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.CEOID != nil {
+		addClause(`clients.ceo_id = $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativeAccountID != nil {
+		addClause(`representatives.account_id = $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativeLogin != "" {
+		addClause(`accounts.login ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativeFullName != "" {
+		addClause(`profiles.full_name ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativePhone != "" {
+		addClause(`profiles.phone_number ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativeEmail != "" {
+		addClause(`profiles.email ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativePosition != "" {
+		addClause(`COALESCE(profiles.position, '') ILIKE $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativeBirthFrom != nil {
+		addClause(`profiles.birth_date >= $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.RepresentativeBirthTo != nil {
+		addClause(`profiles.birth_date <= $` + strconv.Itoa(nextPlaceholder))
+	}
+	if filters.Query != "" {
+		addClause(`(
+			clients.name ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+			OR clients.address ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+			OR COALESCE(accounts.login, '') ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+			OR COALESCE(profiles.full_name, '') ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+			OR COALESCE(profiles.phone_number, '') ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+			OR COALESCE(profiles.email, '') ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+			OR COALESCE(profiles.position, '') ILIKE $` + strconv.Itoa(nextPlaceholder) + `
+		)`)
+	}
+
+	if len(clauses) == 0 {
+		return ` ORDER BY clients.name, clients.id`
+	}
+
+	return ` AND ` + strings.Join(clauses, ` AND `) + ` ORDER BY clients.name, clients.id`
+}
+
+func buildClientFilterArgs(filters clientListFilters) []any {
+	args := make([]any, 0)
+	if filters.ID != nil {
+		args = append(args, *filters.ID)
+	}
+	if filters.Name != "" {
+		args = append(args, "%"+filters.Name+"%")
+	}
+	if filters.Address != "" {
+		args = append(args, "%"+filters.Address+"%")
+	}
+	if filters.CEOID != nil {
+		args = append(args, *filters.CEOID)
+	}
+	if filters.RepresentativeAccountID != nil {
+		args = append(args, *filters.RepresentativeAccountID)
+	}
+	if filters.RepresentativeLogin != "" {
+		args = append(args, "%"+filters.RepresentativeLogin+"%")
+	}
+	if filters.RepresentativeFullName != "" {
+		args = append(args, "%"+filters.RepresentativeFullName+"%")
+	}
+	if filters.RepresentativePhone != "" {
+		args = append(args, "%"+filters.RepresentativePhone+"%")
+	}
+	if filters.RepresentativeEmail != "" {
+		args = append(args, "%"+filters.RepresentativeEmail+"%")
+	}
+	if filters.RepresentativePosition != "" {
+		args = append(args, "%"+filters.RepresentativePosition+"%")
+	}
+	if filters.RepresentativeBirthFrom != nil {
+		args = append(args, *filters.RepresentativeBirthFrom)
+	}
+	if filters.RepresentativeBirthTo != nil {
+		args = append(args, *filters.RepresentativeBirthTo)
+	}
+	if filters.Query != "" {
+		args = append(args, "%"+filters.Query+"%")
+	}
+	return args
 }

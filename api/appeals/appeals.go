@@ -98,6 +98,13 @@ type addReactionRequest struct {
 	ReactionID int64 `json:"reaction_id"`
 }
 
+const (
+	appealLinkTypeRelated    = "related"
+	appealLinkTypeSubtask    = "subtask"
+	appealLinkTypeParentFor  = "parent_for"
+	appealLinkTypeSubtaskFor = "subtask_for"
+)
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -147,9 +154,27 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 func ListAppealsHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT
-			id, title, description, type_id, status_id, criticality_id, client_id, site_id, product_id,
-			created_at, created_by, updated_at, updated_by, responsible_id
-		FROM "tasks"."Tickets"
+			tickets.id,
+			tickets.title,
+			tickets.description,
+			tickets.type_id,
+			tickets.status_id,
+			tickets.criticality_id,
+			tickets.client_id,
+			tickets.site_id,
+			tickets.product_id,
+			tickets.created_at,
+			tickets.created_by,
+			tickets.updated_at,
+			tickets.updated_by,
+			tickets.responsible_id
+		FROM "tasks"."Tickets" tickets
+		LEFT JOIN "crm"."Clients" clients ON clients.id = tickets.client_id
+		LEFT JOIN "crm"."Sites" sites ON sites.id = tickets.site_id
+		LEFT JOIN "crm"."Products" products ON products.id = tickets.product_id
+		LEFT JOIN "profiles"."Profiles" responsible_profiles ON responsible_profiles.account_id = tickets.responsible_id
+		LEFT JOIN "profiles"."Profiles" created_profiles ON created_profiles.account_id = tickets.created_by
+		LEFT JOIN "profiles"."Profiles" updated_profiles ON updated_profiles.account_id = tickets.updated_by
 		WHERE 1 = 1
 	`
 
@@ -181,6 +206,29 @@ func ListAppealsHandler(w http.ResponseWriter, r *http.Request) {
 		query += " AND " + column + " " + op + " $" + strconv.Itoa(len(args))
 		return nil
 	}
+	addLikeFilter := func(column, raw string) {
+		args = append(args, "%"+strings.TrimSpace(raw)+"%")
+		query += " AND " + column + " ILIKE $" + strconv.Itoa(len(args))
+	}
+	addGeneralFilter := func(raw string) {
+		pattern := "%" + strings.TrimSpace(raw) + "%"
+		args = append(args, pattern)
+		placeholder := "$" + strconv.Itoa(len(args))
+		query += `
+			AND (
+				tickets.title ILIKE ` + placeholder + `
+				OR tickets.description ILIKE ` + placeholder + `
+				OR COALESCE(clients.name, '') ILIKE ` + placeholder + `
+				OR COALESCE(clients.address, '') ILIKE ` + placeholder + `
+				OR COALESCE(sites.name, '') ILIKE ` + placeholder + `
+				OR COALESCE(sites.address, '') ILIKE ` + placeholder + `
+				OR COALESCE(products.name, '') ILIKE ` + placeholder + `
+				OR COALESCE(responsible_profiles.full_name, '') ILIKE ` + placeholder + `
+				OR COALESCE(created_profiles.full_name, '') ILIKE ` + placeholder + `
+				OR COALESCE(updated_profiles.full_name, '') ILIKE ` + placeholder + `
+			)
+		`
+	}
 
 	for _, item := range []struct {
 		column string
@@ -188,17 +236,20 @@ func ListAppealsHandler(w http.ResponseWriter, r *http.Request) {
 		kind   string
 		op     string
 	}{
-		{"type_id", r.URL.Query().Get("type_id"), "int", "="},
-		{"status_id", r.URL.Query().Get("status_id"), "int", "="},
-		{"criticality_id", r.URL.Query().Get("criticality_id"), "int", "="},
-		{"client_id", r.URL.Query().Get("client_id"), "int64", "="},
-		{"site_id", r.URL.Query().Get("site_id"), "int64", "="},
-		{"product_id", r.URL.Query().Get("product_id"), "int", "="},
-		{"responsible_id", r.URL.Query().Get("responsible_id"), "int64", "="},
-		{"created_at", r.URL.Query().Get("created_from"), "time", ">="},
-		{"created_at", r.URL.Query().Get("created_to"), "time", "<="},
-		{"updated_at", r.URL.Query().Get("updated_from"), "time", ">="},
-		{"updated_at", r.URL.Query().Get("updated_to"), "time", "<="},
+		{"tickets.id", r.URL.Query().Get("id"), "int64", "="},
+		{"tickets.type_id", r.URL.Query().Get("type_id"), "int", "="},
+		{"tickets.status_id", r.URL.Query().Get("status_id"), "int", "="},
+		{"tickets.criticality_id", r.URL.Query().Get("criticality_id"), "int", "="},
+		{"tickets.client_id", r.URL.Query().Get("client_id"), "int64", "="},
+		{"tickets.site_id", r.URL.Query().Get("site_id"), "int64", "="},
+		{"tickets.product_id", r.URL.Query().Get("product_id"), "int", "="},
+		{"tickets.responsible_id", r.URL.Query().Get("responsible_id"), "int64", "="},
+		{"tickets.created_by", r.URL.Query().Get("created_by"), "int64", "="},
+		{"tickets.updated_by", r.URL.Query().Get("updated_by"), "int64", "="},
+		{"tickets.created_at", r.URL.Query().Get("created_from"), "time", ">="},
+		{"tickets.created_at", r.URL.Query().Get("created_to"), "time", "<="},
+		{"tickets.updated_at", r.URL.Query().Get("updated_from"), "time", ">="},
+		{"tickets.updated_at", r.URL.Query().Get("updated_to"), "time", "<="},
 	} {
 		if strings.TrimSpace(item.value) == "" {
 			continue
@@ -217,8 +268,17 @@ func ListAppealsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if value := strings.TrimSpace(r.URL.Query().Get("title")); value != "" {
+		addLikeFilter("tickets.title", value)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("description")); value != "" {
+		addLikeFilter("tickets.description", value)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("q")); value != "" {
+		addGeneralFilter(value)
+	}
 
-	query += " ORDER BY updated_at DESC, id DESC"
+	query += " ORDER BY tickets.updated_at DESC, tickets.id DESC"
 	rows, err := database.DB.Query(query, args...)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
@@ -686,33 +746,47 @@ func CreateLinkHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	if body.LinkedAppealID == 0 || appealID == body.LinkedAppealID || !appealExists(body.LinkedAppealID) {
+	relationType, ok := normalizeRequestedRelationType(body.RelationType)
+	if !ok || body.LinkedAppealID == 0 || appealID == body.LinkedAppealID || !appealExists(body.LinkedAppealID) {
 		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
 		return
 	}
 
-	firstID, secondID := normalizeAppealPair(appealID, body.LinkedAppealID)
-	relationType := strings.TrimSpace(body.RelationType)
-	if relationType == "" {
-		relationType = "related"
+	tx, err := database.DB.Begin()
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	var existingCount int
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM "tasks"."ConnectedTickets"
+		WHERE (first_task_id = $1 AND second_task_id = $2)
+			OR (first_task_id = $2 AND second_task_id = $1)
+	`, appealID, body.LinkedAppealID).Scan(&existingCount)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if existingCount > 0 {
+		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
+		return
 	}
 
-	result, err := database.DB.Exec(`
-		INSERT INTO "tasks"."ConnectedTickets" (first_task_id, second_task_id, relation_type)
-		VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING
-	`, firstID, secondID, relationType)
-	if err != nil {
-		http.Error(w, "database error", http.StatusInternalServerError)
-		return
+	for _, record := range buildDirectedLinkRecords(appealID, body.LinkedAppealID, relationType) {
+		if _, err := tx.Exec(`
+			INSERT INTO "tasks"."ConnectedTickets" (first_task_id, second_task_id, relation_type)
+			VALUES ($1, $2, $3)
+		`, record.FirstTaskID, record.SecondTaskID, record.RelationType); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
+
+	if err := tx.Commit(); err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
-		return
-	}
-	if affected == 0 {
-		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
 		return
 	}
 
@@ -732,11 +806,11 @@ func CreateLinkHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
 }
 
 func DeleteLinkHandler(w http.ResponseWriter, r *http.Request, appealID, linkedAppealID int64) {
-	firstID, secondID := normalizeAppealPair(appealID, linkedAppealID)
 	result, err := database.DB.Exec(`
 		DELETE FROM "tasks"."ConnectedTickets"
-		WHERE first_task_id = $1 AND second_task_id = $2
-	`, firstID, secondID)
+		WHERE (first_task_id = $1 AND second_task_id = $2)
+			OR (first_task_id = $2 AND second_task_id = $1)
+	`, appealID, linkedAppealID)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -1001,8 +1075,8 @@ func listReactionIDsByCommentIDs(commentIDs []int64) (map[int64][]int64, error) 
 func listLinksByAppealID(appealID int64) ([]appealLinkResponse, error) {
 	rows, err := database.DB.Query(`
 		SELECT
-			CASE WHEN connected.first_task_id = $1 THEN connected.first_task_id ELSE connected.second_task_id END AS appeal_id,
-			CASE WHEN connected.first_task_id = $1 THEN connected.second_task_id ELSE connected.first_task_id END AS linked_appeal_id,
+			connected.first_task_id AS appeal_id,
+			connected.second_task_id AS linked_appeal_id,
 			connected.relation_type,
 			tickets.id,
 			tickets.title,
@@ -1010,10 +1084,15 @@ func listLinksByAppealID(appealID int64) ([]appealLinkResponse, error) {
 			tickets.status_id,
 			tickets.criticality_id
 		FROM "tasks"."ConnectedTickets" connected
-		JOIN "tasks"."Tickets" tickets
-			ON tickets.id = CASE WHEN connected.first_task_id = $1 THEN connected.second_task_id ELSE connected.first_task_id END
-		WHERE connected.first_task_id = $1 OR connected.second_task_id = $1
-		ORDER BY linked_appeal_id
+		JOIN "tasks"."Tickets" tickets ON tickets.id = connected.second_task_id
+		WHERE connected.first_task_id = $1
+		ORDER BY
+			CASE connected.relation_type
+				WHEN 'parent_for' THEN 0
+				WHEN 'related' THEN 1
+				ELSE 2
+			END,
+			connected.second_task_id
 	`, appealID)
 	if err != nil {
 		return nil, err
@@ -1146,9 +1225,33 @@ func validateAppealConsistency(clientID int64, siteID *int64, productID *int, re
 	return true
 }
 
-func normalizeAppealPair(left, right int64) (int64, int64) {
-	if left < right {
-		return left, right
+type directedLinkRecord struct {
+	FirstTaskID  int64
+	SecondTaskID int64
+	RelationType string
+}
+
+func normalizeRequestedRelationType(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", appealLinkTypeRelated:
+		return appealLinkTypeRelated, true
+	case appealLinkTypeSubtask:
+		return appealLinkTypeSubtask, true
+	default:
+		return "", false
 	}
-	return right, left
+}
+
+func buildDirectedLinkRecords(appealID, linkedAppealID int64, relationType string) []directedLinkRecord {
+	if relationType == appealLinkTypeSubtask {
+		return []directedLinkRecord{
+			{FirstTaskID: appealID, SecondTaskID: linkedAppealID, RelationType: appealLinkTypeParentFor},
+			{FirstTaskID: linkedAppealID, SecondTaskID: appealID, RelationType: appealLinkTypeSubtaskFor},
+		}
+	}
+
+	return []directedLinkRecord{
+		{FirstTaskID: appealID, SecondTaskID: linkedAppealID, RelationType: appealLinkTypeRelated},
+		{FirstTaskID: linkedAppealID, SecondTaskID: appealID, RelationType: appealLinkTypeRelated},
+	}
 }

@@ -199,6 +199,25 @@ func TestEmployeesCRUDAndFilters(t *testing.T) {
 			t.Fatalf("updated employee was not returned by role filter: %+v", wfmEmployees)
 		}
 
+		status, body = authorizedJSONRequest(
+			t,
+			http.MethodGet,
+			fmt.Sprintf(
+				"%s/api/v1/employees?account_id=%d&login=Auto&full_name=Updated&email=updated@example.com&position=Updated&birth_date_from=1994-07-01&birth_date_to=1994-07-31&hire_date_from=2025-01-01&hire_date_to=2025-12-31&q=Autotest",
+				serverURL,
+				created.AccountID,
+			),
+			admin.AccessToken,
+			nil,
+		)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var deeplyFilteredEmployees []employeeResponse
+		decodeJSON(t, body, &deeplyFilteredEmployees)
+		if match := findEmployeeByLogin(deeplyFilteredEmployees, "AutoEmployee"); match == nil || match.AccountID != created.AccountID {
+			t.Fatalf("employee was not returned by extended filters: %+v", deeplyFilteredEmployees)
+		}
+
 		status, body = authorizedJSONRequest(t, http.MethodDelete, fmt.Sprintf("%s/api/v1/employees/%d", serverURL, created.AccountID), admin.AccessToken, nil)
 		requireStatus(t, status, http.StatusNoContent, body)
 
@@ -247,6 +266,7 @@ func TestClientsRepresentativesAndSites(t *testing.T) {
 			"full_name":    "Autotest Representative",
 			"phone_number": "+7 900 111 22 33",
 			"email":        "representative@example.com",
+			"birth_date":   "1992-03-14",
 			"position":     "Coordinator",
 		})
 		requireStatus(t, status, http.StatusCreated, body)
@@ -273,6 +293,19 @@ func TestClientsRepresentativesAndSites(t *testing.T) {
 		}
 		if len(foundClient.Representatives) != 1 || foundClient.Representatives[0].Login != "AutoRepresentative" {
 			t.Fatalf("representative not nested into client response: %+v", foundClient.Representatives)
+		}
+
+		status, body = authorizedJSONRequest(
+			t,
+			http.MethodGet,
+			serverURL+"/api/v1/clients?name=Autotest&address=Test&representative_login=AutoRepresentative&representative_full_name=Autotest&representative_email=representative@example.com&representative_position=Coordinator&representative_birth_date_from=1992-03-01&representative_birth_date_to=1992-03-31&q=Client",
+			admin.AccessToken,
+			nil,
+		)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &clients)
+		if filteredClient := findClientByName(clients, "Autotest Client Updated"); filteredClient == nil {
+			t.Fatalf("client was not returned by extended filters: %+v", clients)
 		}
 
 		status, body = authorizedJSONRequest(t, http.MethodPatch, fmt.Sprintf("%s/api/v1/representatives/%d", serverURL, createdRepresentative.AccountID), admin.AccessToken, map[string]any{
@@ -351,6 +384,20 @@ func TestClientsRepresentativesAndSites(t *testing.T) {
 		filteredSite := findSiteByID(sites, createdSite.ID)
 		if filteredSite == nil || filteredSite.ClientID != derivedClient.ID {
 			t.Fatalf("site filter did not return expected client derivation: %+v", sites)
+		}
+
+		status, body = authorizedJSONRequest(
+			t,
+			http.MethodGet,
+			fmt.Sprintf("%s/api/v1/sites?id=%d&client_id=%d&responsible_id=%d&product_id=1&name=Autotest&address=Kazan&q=Site", serverURL, createdSite.ID, derivedClient.ID, siteRepresentative.AccountID),
+			admin.AccessToken,
+			nil,
+		)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &sites)
+		filteredSite = findSiteByID(sites, createdSite.ID)
+		if filteredSite == nil {
+			t.Fatalf("site was not returned by extended filters: %+v", sites)
 		}
 
 		status, body = authorizedJSONRequest(t, http.MethodPatch, fmt.Sprintf("%s/api/v1/representatives/%d", serverURL, siteRepresentative.AccountID), admin.AccessToken, map[string]any{
@@ -465,6 +512,19 @@ func TestEquipmentCRUDAndFilters(t *testing.T) {
 			t.Fatalf("updated equipment not found by combined filters: %+v", filtered)
 		}
 
+		status, body = authorizedJSONRequest(
+			t,
+			http.MethodGet,
+			fmt.Sprintf("%s/api/v1/equipment?id=%d&site_id=2&type_id=2&client_id=1&product_id=3&serial_number=SER&name=Updated&description=Updated&q=Equipment", serverURL, created.ID),
+			admin.AccessToken,
+			nil,
+		)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &filtered)
+		if findEquipmentByID(filtered, created.ID) == nil {
+			t.Fatalf("updated equipment not found by extended filters: %+v", filtered)
+		}
+
 		status, body = authorizedJSONRequest(t, http.MethodDelete, fmt.Sprintf("%s/api/v1/equipment/%d", serverURL, created.ID), admin.AccessToken, nil)
 		requireStatus(t, status, http.StatusNoContent, body)
 
@@ -552,6 +612,19 @@ func TestAppealsLifecycleValidationAndDeletionRules(t *testing.T) {
 		decodeJSON(t, body, &appeals)
 		if findAppealByID(appeals, created.ID) == nil {
 			t.Fatalf("appeal not found in filtered list: %+v", appeals)
+		}
+
+		status, body = authorizedJSONRequest(
+			t,
+			http.MethodGet,
+			fmt.Sprintf("%s/api/v1/appeals?id=%d&title=Autotest&description=lifecycle&client_id=1&site_id=1&product_id=1&responsible_id=%d&created_by=%d&updated_by=%d&q=Appeal", serverURL, created.ID, responsibleID, me.AccountID, me.AccountID),
+			admin.AccessToken,
+			nil,
+		)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &appeals)
+		if match := findAppealByID(appeals, created.ID); match == nil || match.CreatedBy != me.AccountID {
+			t.Fatalf("appeal was not returned by extended filters: %+v", appeals)
 		}
 
 		status, body = authorizedJSONRequest(t, http.MethodPatch, fmt.Sprintf("%s/api/v1/appeals/%d", serverURL, created.ID), admin.AccessToken, map[string]any{
@@ -683,11 +756,18 @@ func TestAppealCommentsLinksAndReactions(t *testing.T) {
 			"linked_appeal_id": 1,
 			"relation_type":    "blocks",
 		})
+		requireStatus(t, status, http.StatusBadRequest, body)
+		requireTrimmedBody(t, body, "all fields are inconsistent")
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/appeals/%d/links", serverURL, appeal.ID), admin.AccessToken, map[string]any{
+			"linked_appeal_id": 1,
+			"relation_type":    "subtask",
+		})
 		requireStatus(t, status, http.StatusCreated, body)
 
 		var createdLink appealLinkResponse
 		decodeJSON(t, body, &createdLink)
-		if createdLink.LinkedAppealID != 1 || createdLink.RelationType != "blocks" {
+		if createdLink.LinkedAppealID != 1 || createdLink.RelationType != "parent_for" {
 			t.Fatalf("link mismatch: %+v", createdLink)
 		}
 
@@ -702,12 +782,27 @@ func TestAppealCommentsLinksAndReactions(t *testing.T) {
 
 		var links []appealLinkResponse
 		decodeJSON(t, body, &links)
-		if len(links) != 1 || links[0].LinkedAppealID != 1 {
+		if len(links) != 1 || links[0].LinkedAppealID != 1 || links[0].RelationType != "parent_for" {
 			t.Fatalf("links mismatch: %+v", links)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/appeals/%d/links", serverURL, 1), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &links)
+		reverseLink := findAppealLinkByLinkedAppealID(links, appeal.ID)
+		if reverseLink == nil || reverseLink.RelationType != "subtask_for" {
+			t.Fatalf("reverse link mismatch: %+v", links)
 		}
 
 		status, body = authorizedJSONRequest(t, http.MethodDelete, fmt.Sprintf("%s/api/v1/appeals/%d/links/1", serverURL, appeal.ID), admin.AccessToken, nil)
 		requireStatus(t, status, http.StatusNoContent, body)
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/appeals/%d/links", serverURL, 1), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &links)
+		if findAppealLinkByLinkedAppealID(links, appeal.ID) != nil {
+			t.Fatalf("link should be removed from both directions: %+v", links)
+		}
 
 		status, body = authorizedJSONRequest(t, http.MethodDelete, fmt.Sprintf("%s/api/v1/appeals/%d/comments/%d/reactions/%d", serverURL, appeal.ID, createdComment.ID, bootstrap.Reactions[0].ID), admin.AccessToken, nil)
 		requireStatus(t, status, http.StatusNoContent, body)

@@ -69,8 +69,6 @@ func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func ListEmployeesHandler(w http.ResponseWriter, r *http.Request) {
-	roleFilter := strings.TrimSpace(r.URL.Query().Get("role"))
-
 	sqlText := `
 		SELECT
 			accounts.id,
@@ -90,9 +88,94 @@ func ListEmployeesHandler(w http.ResponseWriter, r *http.Request) {
 	`
 
 	args := make([]any, 0)
-	if roleFilter != "" {
-		sqlText += ` WHERE roles.name = $1`
-		args = append(args, roleFilter)
+	clauses := make([]string, 0)
+
+	addInt64Filter := func(column, raw string) error {
+		value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil {
+			return err
+		}
+		args = append(args, value)
+		clauses = append(clauses, column+" = $"+strconv.Itoa(len(args)))
+		return nil
+	}
+	addStringFilter := func(column, raw string) {
+		args = append(args, "%"+strings.TrimSpace(raw)+"%")
+		clauses = append(clauses, column+" ILIKE $"+strconv.Itoa(len(args)))
+	}
+	addDateFilter := func(column, raw string, operator string) error {
+		value, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
+		if err != nil {
+			return err
+		}
+		args = append(args, value)
+		clauses = append(clauses, column+" "+operator+" $"+strconv.Itoa(len(args)))
+		return nil
+	}
+
+	for _, item := range []struct {
+		column string
+		value  string
+		kind   string
+		op     string
+	}{
+		{"accounts.id", r.URL.Query().Get("account_id"), "int64", "="},
+		{"roles.name", r.URL.Query().Get("role"), "exact", "="},
+		{"profiles.birth_date", r.URL.Query().Get("birth_date_from"), "date", ">="},
+		{"profiles.birth_date", r.URL.Query().Get("birth_date_to"), "date", "<="},
+		{"employees.hire_date", r.URL.Query().Get("hire_date_from"), "date", ">="},
+		{"employees.hire_date", r.URL.Query().Get("hire_date_to"), "date", "<="},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			continue
+		}
+
+		var err error
+		switch item.kind {
+		case "int64":
+			err = addInt64Filter(item.column, item.value)
+		case "exact":
+			args = append(args, strings.TrimSpace(item.value))
+			clauses = append(clauses, item.column+" = $"+strconv.Itoa(len(args)))
+		case "date":
+			err = addDateFilter(item.column, item.value, item.op)
+		}
+		if err != nil {
+			http.Error(w, "invalid query parameters", http.StatusBadRequest)
+			return
+		}
+	}
+
+	for _, item := range []struct {
+		column string
+		value  string
+	}{
+		{"accounts.login", r.URL.Query().Get("login")},
+		{"profiles.full_name", r.URL.Query().Get("full_name")},
+		{"profiles.phone_number", r.URL.Query().Get("phone_number")},
+		{"profiles.email", r.URL.Query().Get("email")},
+		{"profiles.position", r.URL.Query().Get("position")},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			continue
+		}
+		addStringFilter(item.column, item.value)
+	}
+
+	if value := strings.TrimSpace(r.URL.Query().Get("q")); value != "" {
+		args = append(args, "%"+value+"%")
+		placeholder := "$" + strconv.Itoa(len(args))
+		clauses = append(clauses, `(
+			accounts.login ILIKE `+placeholder+`
+			OR profiles.full_name ILIKE `+placeholder+`
+			OR profiles.phone_number ILIKE `+placeholder+`
+			OR profiles.email ILIKE `+placeholder+`
+			OR COALESCE(profiles.position, '') ILIKE `+placeholder+`
+		)`)
+	}
+
+	if len(clauses) > 0 {
+		sqlText += ` WHERE ` + strings.Join(clauses, ` AND `)
 	}
 	sqlText += ` ORDER BY profiles.full_name, accounts.id`
 

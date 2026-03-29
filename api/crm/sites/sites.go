@@ -66,11 +66,22 @@ func ListSitesHandler(w http.ResponseWriter, r *http.Request) {
 			representatives.client_id
 		FROM "crm"."Sites" sites
 		JOIN "crm"."Representatives" representatives ON representatives.account_id = sites.responsible_id
+		LEFT JOIN "profiles"."Profiles" responsible_profiles ON responsible_profiles.account_id = sites.responsible_id
+		LEFT JOIN "crm"."Clients" clients ON clients.id = representatives.client_id
 	`
 
 	args := make([]any, 0)
 	clauses := make([]string, 0)
 
+	if value := strings.TrimSpace(r.URL.Query().Get("id")); value != "" {
+		parsedValue, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			http.Error(w, "invalid query parameters", http.StatusBadRequest)
+			return
+		}
+		clauses = append(clauses, "sites.id = $"+strconv.Itoa(len(args)+1))
+		args = append(args, parsedValue)
+	}
 	if value := strings.TrimSpace(r.URL.Query().Get("client_id")); value != "" {
 		parsedValue, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
@@ -88,6 +99,44 @@ func ListSitesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		clauses = append(clauses, "sites.responsible_id = $"+strconv.Itoa(len(args)+1))
 		args = append(args, parsedValue)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("product_id")); value != "" {
+		parsedValue, err := strconv.Atoi(value)
+		if err != nil {
+			http.Error(w, "invalid query parameters", http.StatusBadRequest)
+			return
+		}
+		clauses = append(clauses, `EXISTS (
+			SELECT 1
+			FROM "crm"."SitesProducts" products_filter
+			WHERE products_filter.site_id = sites.id AND products_filter.product_id = $`+strconv.Itoa(len(args)+1)+`
+		)`)
+		args = append(args, parsedValue)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("name")); value != "" {
+		clauses = append(clauses, "sites.name ILIKE $"+strconv.Itoa(len(args)+1))
+		args = append(args, "%"+value+"%")
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("address")); value != "" {
+		clauses = append(clauses, "sites.address ILIKE $"+strconv.Itoa(len(args)+1))
+		args = append(args, "%"+value+"%")
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("q")); value != "" {
+		clauses = append(clauses, `(
+			sites.name ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR sites.address ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR COALESCE(clients.name, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR COALESCE(clients.address, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR COALESCE(responsible_profiles.full_name, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR EXISTS (
+				SELECT 1
+				FROM "crm"."SitesProducts" linked_products
+				JOIN "crm"."Products" products ON products.id = linked_products.product_id
+				WHERE linked_products.site_id = sites.id
+					AND products.name ILIKE $`+strconv.Itoa(len(args)+1)+`
+			)
+		)`)
+		args = append(args, "%"+value+"%")
 	}
 	if len(clauses) > 0 {
 		query += " WHERE " + strings.Join(clauses, " AND ")

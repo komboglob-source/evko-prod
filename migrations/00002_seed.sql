@@ -291,7 +291,8 @@ INSERT INTO "tasks"."Tickets" (
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "tasks"."ConnectedTickets" (first_task_id, second_task_id, relation_type) VALUES
-    (1, 3, 'related')
+    (1, 3, 'parent_for'),
+    (3, 1, 'subtask_for')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "tasks"."Comments" (id, ticket_id, is_closed_comment, created_by, created_at, updated_at, contents) VALUES

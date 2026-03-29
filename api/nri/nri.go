@@ -112,19 +112,39 @@ func EquipmentHandler(w http.ResponseWriter, r *http.Request, path string) {
 
 func ListEquipmentHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
-		SELECT id, type_id, site_id, serial_number, name, weight, COALESCE(description, '')
-		FROM "nri"."Equipment"
+		SELECT
+			equipment.id,
+			equipment.type_id,
+			equipment.site_id,
+			equipment.serial_number,
+			equipment.name,
+			equipment.weight,
+			COALESCE(equipment.description, '')
+		FROM "nri"."Equipment" equipment
+		JOIN "crm"."Sites" sites ON sites.id = equipment.site_id
+		JOIN "crm"."Representatives" representatives ON representatives.account_id = sites.responsible_id
+		LEFT JOIN "crm"."Clients" clients ON clients.id = representatives.client_id
+		LEFT JOIN "nri"."Equipment_Types" equipment_types ON equipment_types.id = equipment.type_id
 	`
 
 	args := make([]any, 0)
 	clauses := make([]string, 0)
+	if value := strings.TrimSpace(r.URL.Query().Get("id")); value != "" {
+		parsedValue, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			http.Error(w, "invalid query parameters", http.StatusBadRequest)
+			return
+		}
+		clauses = append(clauses, "equipment.id = $"+strconv.Itoa(len(args)+1))
+		args = append(args, parsedValue)
+	}
 	if value := strings.TrimSpace(r.URL.Query().Get("site_id")); value != "" {
 		parsedValue, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			http.Error(w, "invalid query parameters", http.StatusBadRequest)
 			return
 		}
-		clauses = append(clauses, "site_id = $"+strconv.Itoa(len(args)+1))
+		clauses = append(clauses, "equipment.site_id = $"+strconv.Itoa(len(args)+1))
 		args = append(args, parsedValue)
 	}
 	if value := strings.TrimSpace(r.URL.Query().Get("type_id")); value != "" {
@@ -133,13 +153,75 @@ func ListEquipmentHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid query parameters", http.StatusBadRequest)
 			return
 		}
-		clauses = append(clauses, "type_id = $"+strconv.Itoa(len(args)+1))
+		clauses = append(clauses, "equipment.type_id = $"+strconv.Itoa(len(args)+1))
 		args = append(args, parsedValue)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("client_id")); value != "" {
+		parsedValue, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			http.Error(w, "invalid query parameters", http.StatusBadRequest)
+			return
+		}
+		clauses = append(clauses, "representatives.client_id = $"+strconv.Itoa(len(args)+1))
+		args = append(args, parsedValue)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("product_id")); value != "" {
+		parsedValue, err := strconv.Atoi(value)
+		if err != nil {
+			http.Error(w, "invalid query parameters", http.StatusBadRequest)
+			return
+		}
+		clauses = append(clauses, `EXISTS (
+			SELECT 1
+			FROM "crm"."SitesProducts" linked_products
+			WHERE linked_products.site_id = equipment.site_id AND linked_products.product_id = $`+strconv.Itoa(len(args)+1)+`
+		)`)
+		args = append(args, parsedValue)
+	}
+	for _, item := range []struct {
+		column string
+		value  string
+	}{
+		{"equipment.serial_number", r.URL.Query().Get("serial_number")},
+		{"equipment.name", r.URL.Query().Get("name")},
+		{"equipment.description", r.URL.Query().Get("description")},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			continue
+		}
+		clauses = append(clauses, item.column+" ILIKE $"+strconv.Itoa(len(args)+1))
+		args = append(args, "%"+strings.TrimSpace(item.value)+"%")
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("q")); value != "" {
+		clauses = append(clauses, `(
+			COALESCE(equipment.serial_number, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR equipment.name ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR COALESCE(equipment.description, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR COALESCE(equipment_types.name, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR COALESCE(clients.name, '') ILIKE $`+strconv.Itoa(len(args)+1)+`
+			OR EXISTS (
+				SELECT 1
+				FROM "crm"."Sites" linked_sites
+				WHERE linked_sites.id = equipment.site_id
+					AND (
+						linked_sites.name ILIKE $`+strconv.Itoa(len(args)+1)+`
+						OR linked_sites.address ILIKE $`+strconv.Itoa(len(args)+1)+`
+					)
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM "crm"."SitesProducts" linked_products
+				JOIN "crm"."Products" products ON products.id = linked_products.product_id
+				WHERE linked_products.site_id = equipment.site_id
+					AND products.name ILIKE $`+strconv.Itoa(len(args)+1)+`
+			)
+		)`)
+		args = append(args, "%"+value+"%")
 	}
 	if len(clauses) > 0 {
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
-	query += " ORDER BY name, id"
+	query += " ORDER BY equipment.name, equipment.id"
 
 	rows, err := database.DB.Query(query, args...)
 	if err != nil {

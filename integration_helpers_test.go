@@ -514,3 +514,12 @@ func findAppealByID(items []appealResponse, appealID int64) *appealResponse {
 	}
 	return nil
 }
+
+func findAppealLinkByLinkedAppealID(items []appealLinkResponse, linkedAppealID int64) *appealLinkResponse {
+	for i := range items {
+		if items[i].LinkedAppealID == linkedAppealID {
+			return &items[i]
+		}
+	}
+	return nil
+}

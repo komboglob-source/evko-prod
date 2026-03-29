@@ -154,7 +154,6 @@ CREATE TABLE "tasks"."ConnectedTickets" (
   "first_task_id" bigint,
   "second_task_id" bigint,
   "relation_type" varchar(20) NOT NULL DEFAULT 'related',
-  CHECK (first_task_id < second_task_id),
   PRIMARY KEY ("first_task_id", "second_task_id")
 );
 
