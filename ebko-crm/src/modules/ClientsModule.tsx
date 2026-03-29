@@ -6,6 +6,8 @@ import { CustomSelect } from '../components/CustomSelect'
 interface ClientsModuleProps {
   user: UserProfile
   clients: ClientCompany[]
+  selectedRecordKey?: string | null
+  onSelectRecord?: (recordKey: string | null) => void
   onUpsertRepresentative: (
     customerId: string,
     representative: ClientRepresentative,
@@ -39,6 +41,9 @@ function createEmptyRepresentative(clients: ClientCompany[], customerId: string)
     accountId: nextRepresentativeId(clients),
     clientId: customerId,
     fullName: '',
+    image: '',
+    birthDate: '',
+    position: '',
     phoneNumber: '',
     email: '',
     login: '',
@@ -54,15 +59,33 @@ function recordKey(customerId: string, representativeId: string): string {
 export function ClientsModule({
   user,
   clients,
+  selectedRecordKey: controlledSelectedRecordKey,
+  onSelectRecord,
   onUpsertRepresentative,
   onDeleteRepresentative,
 }: ClientsModuleProps) {
-  const [selectedRecordKey, setSelectedRecordKey] = useState<string | null>(null)
+  const [localSelectedRecordKey, setLocalSelectedRecordKey] = useState<string | null>(null)
   const [draft, setDraft] = useState<RepresentativeDraft | null>(null)
   const [search, setSearch] = useState('')
+  const [customerFilter, setCustomerFilter] = useState('')
+  const [fullNameFilter, setFullNameFilter] = useState('')
+  const [positionFilter, setPositionFilter] = useState('')
+  const [loginFilter, setLoginFilter] = useState('')
+  const [emailFilter, setEmailFilter] = useState('')
+  const [phoneFilter, setPhoneFilter] = useState('')
+  const [birthDateFrom, setBirthDateFrom] = useState('')
+  const [birthDateTo, setBirthDateTo] = useState('')
+
+  const selectedRecordKey = controlledSelectedRecordKey ?? localSelectedRecordKey
+
+  function selectRecord(nextRecordKey: string | null): void {
+    onSelectRecord?.(nextRecordKey)
+    if (controlledSelectedRecordKey === undefined) {
+      setLocalSelectedRecordKey(nextRecordKey)
+    }
+  }
 
   const canManage = canManageRepresentatives(user)
-  const canViewCredentials = user.role !== 'client'
 
   const visibleRecords = useMemo<RepresentativeRecord[]>(
     () =>
@@ -83,22 +106,59 @@ export function ClientsModule({
   )
 
   const filteredRecords = useMemo(() => {
-    if (!search.trim()) {
-      return visibleRecords
-    }
-
-    const normalized = search.toLowerCase()
     return visibleRecords.filter((record) => {
+      const normalized = search.trim().toLowerCase()
+      const normalizedFullName = fullNameFilter.trim().toLowerCase()
+      const normalizedPosition = positionFilter.trim().toLowerCase()
+      const normalizedLogin = loginFilter.trim().toLowerCase()
+      const normalizedEmail = emailFilter.trim().toLowerCase()
+      const normalizedPhone = phoneFilter.trim().toLowerCase()
       const { representative } = record
+      const matchesSearch =
+        !normalized ||
+        `${representative.fullName} ${representative.position} ${representative.phoneNumber} ${representative.email} ${representative.login} ${record.customerName} ${record.customerAddress}`
+          .toLowerCase()
+          .includes(normalized)
+      const matchesCustomer = !customerFilter || record.customerId === customerFilter
+      const matchesFullName =
+        !normalizedFullName || representative.fullName.toLowerCase().includes(normalizedFullName)
+      const matchesPosition =
+        !normalizedPosition || representative.position.toLowerCase().includes(normalizedPosition)
+      const matchesLogin =
+        !normalizedLogin || representative.login.toLowerCase().includes(normalizedLogin)
+      const matchesEmail =
+        !normalizedEmail || representative.email.toLowerCase().includes(normalizedEmail)
+      const matchesPhone =
+        !normalizedPhone || representative.phoneNumber.toLowerCase().includes(normalizedPhone)
+      const matchesBirthDateFrom =
+        !birthDateFrom || Boolean(representative.birthDate && representative.birthDate >= birthDateFrom)
+      const matchesBirthDateTo =
+        !birthDateTo || Boolean(representative.birthDate && representative.birthDate <= birthDateTo)
+
       return (
-        representative.fullName.toLowerCase().includes(normalized) ||
-        representative.phoneNumber.toLowerCase().includes(normalized) ||
-        representative.email.toLowerCase().includes(normalized) ||
-        representative.login.toLowerCase().includes(normalized) ||
-        record.customerName.toLowerCase().includes(normalized)
+        matchesSearch &&
+        matchesCustomer &&
+        matchesFullName &&
+        matchesPosition &&
+        matchesLogin &&
+        matchesEmail &&
+        matchesPhone &&
+        matchesBirthDateFrom &&
+        matchesBirthDateTo
       )
     })
-  }, [search, visibleRecords])
+  }, [
+    birthDateFrom,
+    birthDateTo,
+    customerFilter,
+    emailFilter,
+    fullNameFilter,
+    loginFilter,
+    phoneFilter,
+    positionFilter,
+    search,
+    visibleRecords,
+  ])
 
   const selectedRecord =
     (selectedRecordKey
@@ -118,11 +178,10 @@ export function ClientsModule({
     const safeRepresentative = {
       ...draft.representative,
       clientId: draft.customerId,
-      passwordHash: draft.representative.passwordHash || Math.random().toString(36).slice(2, 12),
     }
 
     await onUpsertRepresentative(draft.customerId, safeRepresentative)
-    setSelectedRecordKey(recordKey(draft.customerId, safeRepresentative.accountId))
+    selectRecord(recordKey(draft.customerId, safeRepresentative.accountId))
     setDraft(null)
   }
 
@@ -149,7 +208,7 @@ export function ClientsModule({
                 customerId,
                 representative: createEmptyRepresentative(clients, customerId),
               })
-              setSelectedRecordKey(null)
+              selectRecord(null)
             }}
             disabled={clients.length === 0}
           >
@@ -159,12 +218,104 @@ export function ClientsModule({
       </div>
 
       {!draft && !selectedRecord ? (
-        <input
-          className="text-input"
-          placeholder="Поиск по ФИО, контактам или компании"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        <div className="form-grid">
+          <label>
+            Общий поиск
+            <input
+              className="text-input"
+              placeholder="По ФИО, компании, адресу, контактам или логину"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+
+          <label>
+            Компания
+            <CustomSelect
+              value={customerFilter}
+              onChange={(event) => setCustomerFilter(event.target.value)}
+              options={[
+                { value: '', label: 'Все компании' },
+                ...clients.map((client) => ({
+                  value: client.id,
+                  label: client.name,
+                })),
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+
+          <label>
+            ФИО
+            <input
+              className="text-input"
+              value={fullNameFilter}
+              onChange={(event) => setFullNameFilter(event.target.value)}
+              placeholder="По ФИО"
+            />
+          </label>
+
+          <label>
+            Должность
+            <input
+              className="text-input"
+              value={positionFilter}
+              onChange={(event) => setPositionFilter(event.target.value)}
+              placeholder="По должности"
+            />
+          </label>
+
+          <label>
+            Логин
+            <input
+              className="text-input"
+              value={loginFilter}
+              onChange={(event) => setLoginFilter(event.target.value)}
+              placeholder="По логину"
+            />
+          </label>
+
+          <label>
+            Email
+            <input
+              className="text-input"
+              value={emailFilter}
+              onChange={(event) => setEmailFilter(event.target.value)}
+              placeholder="По email"
+            />
+          </label>
+
+          <label>
+            Телефон
+            <input
+              className="text-input"
+              value={phoneFilter}
+              onChange={(event) => setPhoneFilter(event.target.value)}
+              placeholder="По телефону"
+            />
+          </label>
+
+          <label>
+            Дата рождения с
+            <input
+              className="text-input"
+              type="date"
+              value={birthDateFrom}
+              onChange={(event) => setBirthDateFrom(event.target.value)}
+            />
+          </label>
+
+          <label>
+            Дата рождения по
+            <input
+              className="text-input"
+              type="date"
+              value={birthDateTo}
+              onChange={(event) => setBirthDateTo(event.target.value)}
+            />
+          </label>
+        </div>
       ) : null}
 
       {draft ? (
@@ -245,6 +396,50 @@ export function ClientsModule({
             </label>
 
             <label>
+              Дата рождения
+              <input
+                className="text-input"
+                type="date"
+                value={draft.representative.birthDate}
+                onChange={(event) =>
+                  setDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          representative: {
+                            ...previous.representative,
+                            birthDate: event.target.value,
+                          },
+                        }
+                      : previous,
+                  )
+                }
+              />
+            </label>
+
+            <label>
+              Должность
+              <input
+                className="text-input"
+                value={draft.representative.position}
+                onChange={(event) =>
+                  setDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          representative: {
+                            ...previous.representative,
+                            position: event.target.value,
+                          },
+                        }
+                      : previous,
+                  )
+                }
+                placeholder="Например, менеджер по эксплуатации"
+              />
+            </label>
+
+            <label>
               Email
               <input
                 className="text-input"
@@ -290,7 +485,7 @@ export function ClientsModule({
             </label>
 
             <label>
-              Пароль (hash)
+              Пароль
               <input
                 className="text-input"
                 value={draft.representative.passwordHash}
@@ -307,7 +502,8 @@ export function ClientsModule({
                       : previous,
                   )
                 }
-                placeholder="Если пусто - сгенерируется автоматически"
+                placeholder={selectedRecord ? 'Оставьте пустым, чтобы не менять' : 'Введите пароль'}
+                required={!selectedRecord}
               />
             </label>
           </div>
@@ -330,7 +526,7 @@ export function ClientsModule({
             <button
               type="button"
               className="ghost-button button-sm"
-              onClick={() => setSelectedRecordKey(null)}
+              onClick={() => selectRecord(null)}
             >
               К списку
             </button>
@@ -351,13 +547,14 @@ export function ClientsModule({
                 <strong>Email:</strong> {selectedRecord.representative.email}
               </p>
               <p>
+                <strong>Должность:</strong> {selectedRecord.representative.position || 'Не задана'}
+              </p>
+              <p>
+                <strong>Дата рождения:</strong> {selectedRecord.representative.birthDate || 'Не задана'}
+              </p>
+              <p>
                 <strong>Логин:</strong> {selectedRecord.representative.login}
               </p>
-              {canViewCredentials ? (
-                <p>
-                  <strong>Пароль (hash):</strong> {selectedRecord.representative.passwordHash}
-                </p>
-              ) : null}
             </div>
           </div>
 
@@ -379,12 +576,12 @@ export function ClientsModule({
                 type="button"
                 className="danger-button button-sm"
                 onClick={() => {
-                  void onDeleteRepresentative(
-                    selectedRecord.customerId,
-                    selectedRecord.representative.accountId,
-                  )
-                  setSelectedRecordKey(null)
-                }}
+                   void onDeleteRepresentative(
+                     selectedRecord.customerId,
+                     selectedRecord.representative.accountId,
+                   )
+                   selectRecord(null)
+                 }}
               >
                 Удалить
               </button>
@@ -396,16 +593,15 @@ export function ClientsModule({
           {filteredRecords.map((record) => (
             <button
               type="button"
-              key={recordKey(record.customerId, record.representative.accountId)}
-              className="appeal-card"
-              onClick={() =>
-                setSelectedRecordKey(recordKey(record.customerId, record.representative.accountId))
-              }
-            >
+                key={recordKey(record.customerId, record.representative.accountId)}
+                className="appeal-card"
+                onClick={() => selectRecord(recordKey(record.customerId, record.representative.accountId))}
+              >
               <div className="card-row">
                 <strong>{record.representative.fullName}</strong>
                 <span>{record.customerName}</span>
               </div>
+              <p>{record.representative.position || 'Должность не указана'}</p>
               <p>{record.representative.phoneNumber}</p>
               <p>{record.representative.email}</p>
             </button>

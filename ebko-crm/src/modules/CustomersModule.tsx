@@ -32,7 +32,6 @@ interface CustomersModuleProps {
   onUpsertSite: (site: Site) => Promise<void>
   onDeleteSite: (siteId: string) => Promise<void>
   onAttachEquipmentToSite: (equipmentId: string, siteId: string) => Promise<void>
-  onDetachEquipmentFromSite: (equipmentId: string) => Promise<void>
 }
 
 function nextCustomerId(customers: ClientCompany[]): string {
@@ -94,18 +93,48 @@ export function CustomersModule({
   onUpsertSite,
   onDeleteSite,
   onAttachEquipmentToSite,
-  onDetachEquipmentFromSite,
 }: CustomersModuleProps) {
   const [customerDraft, setCustomerDraft] = useState<ClientCompany | null>(null)
   const [siteDraft, setSiteDraft] = useState<Site | null>(null)
   const [equipmentToAttach, setEquipmentToAttach] = useState('')
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [addressFilter, setAddressFilter] = useState('')
+  const [representativeQuery, setRepresentativeQuery] = useState('')
+  const [productFilter, setProductFilter] = useState('')
 
   const canEditCustomers = canManageCustomers(user)
   const canEditSites = canManageCustomerSites(user)
 
   const visibleCustomers = useMemo(
-    () => customers.filter((customer) => canViewCustomer(user, customer)),
-    [customers, user],
+    () =>
+      customers
+        .filter((customer) => canViewCustomer(user, customer))
+        .filter((customer) => {
+          const normalizedCustomerQuery = customerQuery.trim().toLowerCase()
+          const normalizedAddressFilter = addressFilter.trim().toLowerCase()
+          const normalizedRepresentativeQuery = representativeQuery.trim().toLowerCase()
+
+          const matchesName =
+            !normalizedCustomerQuery || customer.name.toLowerCase().includes(normalizedCustomerQuery)
+          const matchesAddress =
+            !normalizedAddressFilter ||
+            customer.address.toLowerCase().includes(normalizedAddressFilter)
+          const matchesRepresentative =
+            !normalizedRepresentativeQuery ||
+            customer.representatives.some((representative) =>
+              `${representative.fullName} ${representative.phoneNumber} ${representative.email} ${representative.login}`
+                .toLowerCase()
+                .includes(normalizedRepresentativeQuery),
+            )
+          const matchesProduct =
+            !productFilter ||
+            sites.some(
+              (site) => site.clientId === customer.id && site.productIds.includes(productFilter),
+            )
+
+          return matchesName && matchesAddress && matchesRepresentative && matchesProduct
+        }),
+    [addressFilter, customerQuery, customers, productFilter, representativeQuery, sites, user],
   )
 
   const visibleSites = useMemo(
@@ -206,6 +235,57 @@ export function CustomersModule({
           </button>
         ) : null}
       </div>
+
+      {!selectedCustomer && !selectedSite && !customerDraft && !siteDraft ? (
+        <div className="form-grid">
+          <label>
+            Заказчик
+            <input
+              className="text-input"
+              value={customerQuery}
+              onChange={(event) => setCustomerQuery(event.target.value)}
+              placeholder="По названию компании"
+            />
+          </label>
+
+          <label>
+            Адрес
+            <input
+              className="text-input"
+              value={addressFilter}
+              onChange={(event) => setAddressFilter(event.target.value)}
+              placeholder="По адресу"
+            />
+          </label>
+
+          <label>
+            Представитель
+            <input
+              className="text-input"
+              value={representativeQuery}
+              onChange={(event) => setRepresentativeQuery(event.target.value)}
+              placeholder="По ФИО, телефону, email или логину"
+            />
+          </label>
+
+          <label>
+            Продукт
+            <CustomSelect
+              value={productFilter}
+              onChange={(event) => setProductFilter(event.target.value)}
+              options={[
+                { value: '', label: 'Все продукты' },
+                ...products.map((product) => ({
+                  value: product.id,
+                  label: product.name,
+                })),
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+        </div>
+      ) : null}
 
       {customerDraft ? (
         <form className="inline-form" onSubmit={saveCustomer}>
@@ -496,17 +576,6 @@ export function CustomersModule({
                   <p>Серийный номер: {unit.serialNumber}</p>
                   <p>Тип: {resolveEquipmentTypeName(unit.typeId)}</p>
                   <p>Вес: {unit.weight} кг</p>
-                  {canEditSites ? (
-                    <button
-                      type="button"
-                      className="danger-button button-sm"
-                      onClick={() => {
-                        void onDetachEquipmentFromSite(unit.id)
-                      }}
-                    >
-                      Удалить с площадки
-                    </button>
-                  ) : null}
                 </div>
               ))
             ) : (

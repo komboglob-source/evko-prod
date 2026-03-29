@@ -1,4 +1,4 @@
-﻿import type { AppealCriticality, AppealStatus, ModuleKey, UserRole } from './types'
+import type { AppealCriticality, AppealLinkType, AppealStatus, ModuleKey, UserRole } from './types'
 
 export const MODULES: Array<{ key: ModuleKey; label: string }> = [
   { key: 'appeals', label: 'Обращения' },
@@ -34,12 +34,25 @@ export const PRIORITY_DEADLINE_DAYS: Record<AppealCriticality, number> = {
   Critical: 1,
 }
 
+export const CRITICALITY_LABELS: Record<AppealCriticality, string> = {
+  Basic: 'Базовая',
+  Important: 'Важная',
+  Critical: 'Критическая',
+}
+
 export const STATUS_LABELS: Record<AppealStatus, string> = {
   Created: 'Создано',
   Opened: 'В работе',
   'Customer Pending': 'Ожидание клиента',
   Done: 'Выполнено',
   Verified: 'Проверено',
+}
+
+export const APPEAL_LINK_TYPE_LABELS: Record<AppealLinkType, string> = {
+  related: 'Связано',
+  subtask: 'Подзадача',
+  parent_for: 'Подзадача',
+  subtask_for: 'Родительская задача',
 }
 
 const LEGACY_STATUS_MAP: Record<string, AppealStatus> = {

@@ -3,11 +3,13 @@ import { ROLE_LABELS } from '../constants'
 import { CustomSelect } from '../components/CustomSelect'
 import type { Employee, UserProfile } from '../types'
 import { initials } from '../utils/format'
-import { canManageEmployees, canViewEmployeeCredentials } from '../utils/permissions'
+import { canManageEmployees } from '../utils/permissions'
 
 interface EmployeesModuleProps {
   user: UserProfile
   employees: Employee[]
+  selectedEmployeeId?: string | null
+  onSelectEmployee?: (employeeId: string | null) => void
   onUpsertEmployee: (employee: Employee) => Promise<void>
   onDeleteEmployee: (employeeId: string) => Promise<void>
 }
@@ -71,15 +73,35 @@ function calculateAge(birthDate: string): number {
 export function EmployeesModule({
   user,
   employees,
+  selectedEmployeeId: controlledSelectedEmployeeId,
+  onSelectEmployee,
   onUpsertEmployee,
   onDeleteEmployee,
 }: EmployeesModuleProps) {
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+  const [localSelectedEmployeeId, setLocalSelectedEmployeeId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Employee | null>(null)
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<Employee['role'] | ''>('')
+  const [fullNameFilter, setFullNameFilter] = useState('')
+  const [positionFilter, setPositionFilter] = useState('')
+  const [loginFilter, setLoginFilter] = useState('')
+  const [emailFilter, setEmailFilter] = useState('')
+  const [phoneFilter, setPhoneFilter] = useState('')
+  const [birthDateFrom, setBirthDateFrom] = useState('')
+  const [birthDateTo, setBirthDateTo] = useState('')
+  const [hireDateFrom, setHireDateFrom] = useState('')
+  const [hireDateTo, setHireDateTo] = useState('')
+
+  const selectedEmployeeId = controlledSelectedEmployeeId ?? localSelectedEmployeeId
+
+  function selectEmployee(employeeId: string | null): void {
+    onSelectEmployee?.(employeeId)
+    if (controlledSelectedEmployeeId === undefined) {
+      setLocalSelectedEmployeeId(employeeId)
+    }
+  }
 
   const isAdmin = canManageEmployees(user)
-  const canSeeCredentials = canViewEmployeeCredentials(user)
 
   const sortedEmployees = useMemo(
     () =>
@@ -90,17 +112,67 @@ export function EmployeesModule({
   )
 
   const filteredEmployees = useMemo(() => {
-    if (!search.trim()) {
-      return sortedEmployees
-    }
-
-    const normalized = search.toLowerCase()
     return sortedEmployees.filter((employee) => {
-      const fullName = employee.fullName.toLowerCase()
-      const position = employee.position.toLowerCase()
-      return fullName.includes(normalized) || position.includes(normalized)
+      const normalizedSearch = search.trim().toLowerCase()
+      const normalizedFullName = fullNameFilter.trim().toLowerCase()
+      const normalizedPosition = positionFilter.trim().toLowerCase()
+      const normalizedLogin = loginFilter.trim().toLowerCase()
+      const normalizedEmail = emailFilter.trim().toLowerCase()
+      const normalizedPhone = phoneFilter.trim().toLowerCase()
+
+      const matchesSearch =
+        !normalizedSearch ||
+        `${employee.fullName} ${employee.position} ${employee.phoneNumber} ${employee.email}`
+          .toLowerCase()
+          .includes(normalizedSearch)
+      const matchesRole = !roleFilter || employee.role === roleFilter
+      const matchesFullName =
+        !normalizedFullName || employee.fullName.toLowerCase().includes(normalizedFullName)
+      const matchesPosition =
+        !normalizedPosition || employee.position.toLowerCase().includes(normalizedPosition)
+      const matchesLogin =
+        !normalizedLogin || employee.login.toLowerCase().includes(normalizedLogin)
+      const matchesEmail =
+        !normalizedEmail || employee.email.toLowerCase().includes(normalizedEmail)
+      const matchesPhone =
+        !normalizedPhone || employee.phoneNumber.toLowerCase().includes(normalizedPhone)
+      const matchesBirthDateFrom =
+        !birthDateFrom || Boolean(employee.birthDate && employee.birthDate >= birthDateFrom)
+      const matchesBirthDateTo =
+        !birthDateTo || Boolean(employee.birthDate && employee.birthDate <= birthDateTo)
+      const matchesHireDateFrom =
+        !hireDateFrom || Boolean(employee.hireDate && employee.hireDate >= hireDateFrom)
+      const matchesHireDateTo =
+        !hireDateTo || Boolean(employee.hireDate && employee.hireDate <= hireDateTo)
+
+      return (
+        matchesSearch &&
+        matchesRole &&
+        matchesFullName &&
+        matchesPosition &&
+        matchesLogin &&
+        matchesEmail &&
+        matchesPhone &&
+        matchesBirthDateFrom &&
+        matchesBirthDateTo &&
+        matchesHireDateFrom &&
+        matchesHireDateTo
+      )
     })
-  }, [search, sortedEmployees])
+  }, [
+    birthDateFrom,
+    birthDateTo,
+    emailFilter,
+    fullNameFilter,
+    hireDateFrom,
+    hireDateTo,
+    loginFilter,
+    phoneFilter,
+    positionFilter,
+    roleFilter,
+    search,
+    sortedEmployees,
+  ])
 
   const selectedEmployee =
     (selectedEmployeeId
@@ -124,13 +196,8 @@ export function EmployeesModule({
       return
     }
 
-    const safeDraft = {
-      ...draft,
-      passwordHash: draft.passwordHash || Math.random().toString(36).slice(2, 12),
-    }
-
-    await onUpsertEmployee(safeDraft)
-    setSelectedEmployeeId(safeDraft.accountId)
+    await onUpsertEmployee(draft)
+    selectEmployee(draft.accountId)
     setDraft(null)
   }
 
@@ -144,7 +211,7 @@ export function EmployeesModule({
             className="primary-button button-sm"
             onClick={() => {
               setDraft(defaultEmployee(sortedEmployees))
-              setSelectedEmployeeId(null)
+              selectEmployee(null)
             }}
           >
             Добавить сотрудника
@@ -153,12 +220,124 @@ export function EmployeesModule({
       </div>
 
       {!selectedEmployee && !draft ? (
-        <input
-          className="text-input"
-          placeholder="Поиск по ФИО или должности"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        <div className="form-grid">
+          <label>
+            Общий поиск
+            <input
+              className="text-input"
+              placeholder="По ФИО, должности, телефону или email"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+
+          <label>
+            Роль
+            <CustomSelect
+              value={roleFilter}
+              onChange={(event) => setRoleFilter(event.target.value as Employee['role'] | '')}
+              options={[
+                { value: '', label: 'Все роли' },
+                { value: 'admin', label: 'Админ' },
+                { value: 'ktp', label: 'Оператор КТП' },
+                { value: 'wfm', label: 'Инженер WFM' },
+                { value: 'ebko', label: 'EBKO' },
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+
+          <label>
+            ФИО
+            <input
+              className="text-input"
+              value={fullNameFilter}
+              onChange={(event) => setFullNameFilter(event.target.value)}
+              placeholder="По ФИО"
+            />
+          </label>
+
+          <label>
+            Должность
+            <input
+              className="text-input"
+              value={positionFilter}
+              onChange={(event) => setPositionFilter(event.target.value)}
+              placeholder="По должности"
+            />
+          </label>
+
+          <label>
+            Логин
+            <input
+              className="text-input"
+              value={loginFilter}
+              onChange={(event) => setLoginFilter(event.target.value)}
+              placeholder="По логину"
+            />
+          </label>
+
+          <label>
+            Email
+            <input
+              className="text-input"
+              value={emailFilter}
+              onChange={(event) => setEmailFilter(event.target.value)}
+              placeholder="По email"
+            />
+          </label>
+
+          <label>
+            Телефон
+            <input
+              className="text-input"
+              value={phoneFilter}
+              onChange={(event) => setPhoneFilter(event.target.value)}
+              placeholder="По телефону"
+            />
+          </label>
+
+          <label>
+            Дата рождения с
+            <input
+              className="text-input"
+              type="date"
+              value={birthDateFrom}
+              onChange={(event) => setBirthDateFrom(event.target.value)}
+            />
+          </label>
+
+          <label>
+            Дата рождения по
+            <input
+              className="text-input"
+              type="date"
+              value={birthDateTo}
+              onChange={(event) => setBirthDateTo(event.target.value)}
+            />
+          </label>
+
+          <label>
+            Дата приема с
+            <input
+              className="text-input"
+              type="date"
+              value={hireDateFrom}
+              onChange={(event) => setHireDateFrom(event.target.value)}
+            />
+          </label>
+
+          <label>
+            Дата приема по
+            <input
+              className="text-input"
+              type="date"
+              value={hireDateTo}
+              onChange={(event) => setHireDateTo(event.target.value)}
+            />
+          </label>
+        </div>
       ) : null}
 
       {draft ? (
@@ -328,7 +507,7 @@ export function EmployeesModule({
             </label>
 
             <label>
-              Пароль (hash)
+              Пароль
               <input
                 className="text-input"
                 value={draft.passwordHash}
@@ -342,7 +521,8 @@ export function EmployeesModule({
                       : previous,
                   )
                 }
-                placeholder="Если пусто - сгенерируется автоматически"
+                placeholder={selectedEmployee ? 'Оставьте пустым, чтобы не менять' : 'Введите пароль'}
+                required={!selectedEmployee}
               />
             </label>
 
@@ -416,7 +596,7 @@ export function EmployeesModule({
             <button
               type="button"
               className="ghost-button button-sm"
-              onClick={() => setSelectedEmployeeId(null)}
+              onClick={() => selectEmployee(null)}
             >
               К списку
             </button>
@@ -447,16 +627,9 @@ export function EmployeesModule({
               <p>
                 <strong>Роль:</strong> {ROLE_LABELS[selectedEmployee.role]}
               </p>
-              {canSeeCredentials ? (
-                <>
-                  <p>
-                    <strong>Логин:</strong> {selectedEmployee.login}
-                  </p>
-                  <p>
-                    <strong>Пароль (hash):</strong> {selectedEmployee.passwordHash}
-                  </p>
-                </>
-              ) : null}
+              <p>
+                <strong>Логин:</strong> {selectedEmployee.login}
+              </p>
             </div>
           </div>
 
@@ -474,7 +647,7 @@ export function EmployeesModule({
                 className="danger-button button-sm"
                 onClick={() => {
                   void onDeleteEmployee(selectedEmployee.accountId)
-                  setSelectedEmployeeId(null)
+                  selectEmployee(null)
                 }}
               >
                 Удалить
@@ -489,7 +662,7 @@ export function EmployeesModule({
               type="button"
               key={employee.accountId}
               className="employee-tile"
-              onClick={() => setSelectedEmployeeId(employee.accountId)}
+              onClick={() => selectEmployee(employee.accountId)}
             >
               {employee.image ? (
                 <img className="avatar-photo" src={employee.image} alt={employee.fullName} />

@@ -26,12 +26,19 @@ export function canViewAppeal(user: UserProfile, appeal: Appeal): boolean {
 }
 
 export function canEditAppeal(user: UserProfile, appeal: Appeal): boolean {
+  const isResponsible = appeal.responsibleId === user.id
+  const isAuthor = appeal.createdBy === user.id
+
   if (user.role === 'admin') {
     return true
   }
 
-  if (user.role === 'ktp') {
+  if (isResponsible || isAuthor) {
     return true
+  }
+
+  if (user.role === 'ktp') {
+    return appeal.typeId === 'KTP'
   }
 
   if (user.role === 'wfm') {
@@ -75,7 +82,7 @@ export function canChangeStatus(
       return false
     }
 
-    return true
+    return appeal.typeId === 'KTP' || appeal.responsibleId === user.id
   }
 
   if (user.role === 'wfm') {
@@ -83,7 +90,7 @@ export function canChangeStatus(
       return false
     }
 
-    return appeal.typeId === 'WFM'
+    return appeal.typeId === 'WFM' || appeal.responsibleId === user.id
   }
 
   if (user.role === 'client') {

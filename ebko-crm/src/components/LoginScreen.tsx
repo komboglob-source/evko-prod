@@ -30,7 +30,6 @@ export function LoginScreen({ onLogin, isLoading, errorMessage }: LoginScreenPro
         <div className="login-header">
           <p className="brand-caption">EBKO CRM</p>
           <h1>Вход в систему</h1>
-          <p>Авторизация через `POST /api/v1/auth/login` с Basic Auth.</p>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>

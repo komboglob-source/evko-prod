@@ -2,11 +2,24 @@ import { useState } from 'react'
 import './App.css'
 import { ApiError, login, logout } from './api/auth'
 import {
+  loadAppealById,
   loadCrmBootstrap,
   syncAppealComment,
   syncAppealCreate,
   syncAppealLink,
   syncAppealPatch,
+  syncAppealUnlink,
+  syncClientDelete,
+  syncClientUpsert,
+  syncEmployeeDelete,
+  syncEmployeeUpsert,
+  syncEquipmentDelete,
+  syncEquipmentSite,
+  syncEquipmentUpsert,
+  syncRepresentativeDelete,
+  syncRepresentativeUpsert,
+  syncSiteDelete,
+  syncSiteUpsert,
 } from './api/crm'
 import { LoginScreen } from './components/LoginScreen'
 import { Sidebar } from './components/Sidebar'
@@ -19,6 +32,7 @@ import { ProfileModule } from './modules/ProfileModule'
 import { TaskBoardModule } from './modules/TaskBoardModule'
 import type {
   Appeal,
+  AppealLinkType,
   AppealStatus,
   AuthTokens,
   ClientRepresentative,
@@ -56,6 +70,21 @@ function withCurrentUser(data: CrmBootstrapData, user: UserProfile): CrmBootstra
   }
 }
 
+function mergeAppeals(currentAppeals: Appeal[], nextAppeals: Appeal[]): Appeal[] {
+  const appealMap = new Map(currentAppeals.map((appeal) => [appeal.id, appeal]))
+  for (const appeal of nextAppeals) {
+    appealMap.set(appeal.id, appeal)
+  }
+
+  return Array.from(appealMap.values()).sort(
+    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+  )
+}
+
+function representativeRecordKey(customerId: string, representativeId: string): string {
+  return `${customerId}:${representativeId}`
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [data, setData] = useState<CrmBootstrapData | null>(null)
@@ -63,6 +92,8 @@ function App() {
   const [selectedAppealId, setSelectedAppealId] = useState<string | null>(null)
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+  const [selectedRepresentativeKey, setSelectedRepresentativeKey] = useState<string | null>(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const [isDataLoading, setIsDataLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -86,6 +117,8 @@ function App() {
       setSelectedAppealId(null)
       setSelectedSiteId(null)
       setSelectedCustomerId(null)
+      setSelectedEmployeeId(null)
+      setSelectedRepresentativeKey(null)
     } catch (error) {
       if (error instanceof ApiError) {
         setErrorMessage(error.message)
@@ -112,6 +145,8 @@ function App() {
     setSelectedAppealId(null)
     setSelectedSiteId(null)
     setSelectedCustomerId(null)
+    setSelectedEmployeeId(null)
+    setSelectedRepresentativeKey(null)
     setErrorMessage(null)
   }
 
@@ -122,392 +157,136 @@ function App() {
   const { user, tokens } = session
   const currentData: CrmBootstrapData = data
 
-  async function createAppeal(draft: Omit<Appeal, 'id'>): Promise<void> {
-    const appeal: Appeal = {
-      id: `appeal-${Date.now()}`,
-      ...draft,
-    }
+  async function refreshData(): Promise<void> {
+    const bootstrap = await loadCrmBootstrap(tokens)
+    const currentUser = resolveCurrentUser(user, bootstrap)
+    const hydratedBootstrap = withCurrentUser(bootstrap, currentUser)
 
+    setSession((previous) => (previous ? { ...previous, user: currentUser } : previous))
+    setData(hydratedBootstrap)
+  }
+
+  function replaceAppeals(nextAppeals: Appeal[]): void {
     setData((previous) =>
       previous
         ? {
             ...previous,
-            appeals: [appeal, ...previous.appeals],
+            appeals: mergeAppeals(previous.appeals, nextAppeals),
           }
         : previous,
     )
+  }
 
-    setSelectedAppealId(appeal.id)
-    await syncAppealCreate(tokens, appeal)
+  async function reloadAppealsByID(...appealIDs: string[]): Promise<void> {
+    const uniqueIDs = Array.from(new Set(appealIDs.filter((appealID) => appealID)))
+    if (uniqueIDs.length === 0) {
+      return
+    }
+
+    const nextAppeals = await Promise.all(
+      uniqueIDs.map((appealID) => loadAppealById(tokens, currentData, appealID)),
+    )
+    replaceAppeals(nextAppeals)
+  }
+
+  async function createAppeal(draft: Omit<Appeal, 'id'>): Promise<void> {
+    const createdAppeal = await syncAppealCreate(tokens, currentData, draft)
+    replaceAppeals([createdAppeal])
+    setSelectedAppealId(createdAppeal.id)
   }
 
   async function updateAppeal(appealId: string, patch: Partial<Appeal>): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        appeals: previous.appeals.map((appeal) =>
-          appeal.id === appealId
-            ? {
-                ...appeal,
-                ...patch,
-              }
-            : appeal,
-        ),
-      }
-    })
-
-    await syncAppealPatch(tokens, appealId, patch)
+    const updatedAppeal = await syncAppealPatch(tokens, currentData, appealId, patch)
+    replaceAppeals([updatedAppeal])
   }
 
   async function addComment(appealId: string, contents: string, files: FileAttachment[]): Promise<void> {
-    const now = new Date().toISOString()
-    const comment = {
-      id: crypto.randomUUID(),
-      ticketId: appealId,
-      isClosedComment: false,
-      createdBy: user.id,
-      authorName: user.fullName,
-      contents,
-      createdAt: now,
-      updatedAt: now,
-      files,
-    }
-
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        appeals: previous.appeals.map((appeal) =>
-          appeal.id === appealId
-            ? {
-                ...appeal,
-                comments: [...appeal.comments, comment],
-                updatedAt: now,
-                updatedBy: user.id,
-              }
-            : appeal,
-        ),
-      }
-    })
-
     await syncAppealComment(
       tokens,
       appealId,
       contents,
       files.map((file) => ({ name: file.name, size: file.size })),
     )
+    await reloadAppealsByID(appealId)
   }
 
-  async function linkAppeal(appealId: string, linkedAppealId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        appeals: previous.appeals.map((appeal) => {
-          if (appeal.id !== appealId && appeal.id !== linkedAppealId) {
-            return appeal
-          }
-
-          const reciprocalId = appeal.id === appealId ? linkedAppealId : appealId
-          const alreadyLinked = appeal.linkedTicketIds.includes(reciprocalId)
-          if (alreadyLinked) {
-            return appeal
-          }
-
-          return {
-            ...appeal,
-            linkedTicketIds: [...appeal.linkedTicketIds, reciprocalId],
-            updatedAt: new Date().toISOString(),
-            updatedBy: user.id,
-          }
-        }),
-      }
-    })
-
-    await syncAppealLink(tokens, appealId, linkedAppealId)
+  async function linkAppeal(
+    appealId: string,
+    linkedAppealId: string,
+    relationType: AppealLinkType,
+  ): Promise<void> {
+    await syncAppealLink(tokens, appealId, linkedAppealId, relationType)
+    await reloadAppealsByID(appealId, linkedAppealId)
   }
 
   async function unlinkAppeal(appealId: string, linkedAppealId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        appeals: previous.appeals.map((appeal) => {
-          if (appeal.id !== appealId && appeal.id !== linkedAppealId) {
-            return appeal
-          }
-
-          return {
-            ...appeal,
-            linkedTicketIds: appeal.linkedTicketIds.filter((id) =>
-              appeal.id === appealId ? id !== linkedAppealId : id !== appealId,
-            ),
-            updatedAt: new Date().toISOString(),
-            updatedBy: user.id,
-          }
-        }),
-      }
-    })
-
-    await syncAppealPatch(tokens, appealId, {
-      updatedAt: new Date().toISOString(),
-      updatedBy: user.id,
-    })
+    await syncAppealUnlink(tokens, appealId, linkedAppealId)
+    await reloadAppealsByID(appealId, linkedAppealId)
   }
 
   async function upsertEmployee(employee: Employee): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      const exists = previous.employees.some((item) => item.accountId === employee.accountId)
-      const employees = exists
-        ? previous.employees.map((item) => (item.accountId === employee.accountId ? employee : item))
-        : [...previous.employees, employee]
-
-      return {
-        ...previous,
-        employees,
-      }
-    })
+    const savedEmployee = await syncEmployeeUpsert(tokens, employee)
+    await refreshData()
+    setSelectedEmployeeId(savedEmployee.accountId)
   }
 
   async function deleteEmployee(employeeId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        employees: previous.employees.filter((item) => item.accountId !== employeeId),
-      }
-    })
+    await syncEmployeeDelete(tokens, employeeId)
+    await refreshData()
   }
 
   async function upsertCustomer(customer: ClientCompany): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      const exists = previous.clients.some((item) => item.id === customer.id)
-      const clients = exists
-        ? previous.clients.map((item) => (item.id === customer.id ? customer : item))
-        : [...previous.clients, customer]
-
-      return {
-        ...previous,
-        clients,
-      }
-    })
+    const savedCustomer = await syncClientUpsert(tokens, customer)
+    await refreshData()
+    setSelectedCustomerId(savedCustomer.id)
   }
 
   async function deleteCustomer(customerId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      const sites = previous.sites.filter((site) => site.clientId !== customerId)
-      const deletedSiteIds = new Set(previous.sites.filter((site) => site.clientId === customerId).map((site) => site.id))
-
-      return {
-        ...previous,
-        clients: previous.clients.filter((item) => item.id !== customerId),
-        sites,
-        equipment: previous.equipment.map((item) =>
-          item.siteId && deletedSiteIds.has(item.siteId)
-            ? {
-                ...item,
-                siteId: undefined,
-              }
-            : item,
-        ),
-      }
-    })
+    await syncClientDelete(tokens, customerId)
+    await refreshData()
   }
 
   async function upsertSite(site: Site): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      const exists = previous.sites.some((item) => item.id === site.id)
-      const sites = exists
-        ? previous.sites.map((item) => (item.id === site.id ? site : item))
-        : [...previous.sites, site]
-
-      return {
-        ...previous,
-        sites,
-      }
-    })
+    const savedSite = await syncSiteUpsert(tokens, site)
+    await refreshData()
+    setSelectedCustomerId(savedSite.clientId)
+    setSelectedSiteId(savedSite.id)
   }
 
   async function deleteSite(siteId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        sites: previous.sites.filter((site) => site.id !== siteId),
-        equipment: previous.equipment.map((item) =>
-          item.siteId === siteId
-            ? {
-                ...item,
-                siteId: undefined,
-              }
-            : item,
-        ),
-      }
-    })
+    await syncSiteDelete(tokens, siteId)
+    await refreshData()
   }
 
   async function upsertRepresentative(
     customerId: string,
     representative: ClientRepresentative,
   ): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      const clients = previous.clients.map((client) => {
-        if (client.id !== customerId) {
-          return client
-        }
-
-        const exists = client.representatives.some(
-          (item) => item.accountId === representative.accountId,
-        )
-        const representatives = exists
-          ? client.representatives.map((item) =>
-              item.accountId === representative.accountId ? representative : item,
-            )
-          : [...client.representatives, representative]
-
-        return {
-          ...client,
-          representatives,
-        }
-      })
-
-      return {
-        ...previous,
-        clients,
-      }
-    })
+    const savedRepresentative = await syncRepresentativeUpsert(tokens, customerId, representative)
+    await refreshData()
+    setSelectedRepresentativeKey(representativeRecordKey(savedRepresentative.clientId, savedRepresentative.accountId))
   }
 
   async function deleteRepresentative(customerId: string, representativeId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        clients: previous.clients.map((client) =>
-          client.id === customerId
-            ? {
-                ...client,
-                representatives: client.representatives.filter(
-                  (item) => item.accountId !== representativeId,
-                ),
-              }
-            : client,
-        ),
-      }
-    })
+    void customerId
+    await syncRepresentativeDelete(tokens, representativeId)
+    await refreshData()
   }
 
   async function upsertEquipment(equipmentUnit: EquipmentUnit): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      const exists = previous.equipment.some((item) => item.id === equipmentUnit.id)
-      const equipment = exists
-        ? previous.equipment.map((item) => (item.id === equipmentUnit.id ? equipmentUnit : item))
-        : [...previous.equipment, equipmentUnit]
-
-      return {
-        ...previous,
-        equipment,
-      }
-    })
+    const savedEquipment = await syncEquipmentUpsert(tokens, equipmentUnit)
+    await refreshData()
+    setSelectedSiteId(savedEquipment.siteId ?? selectedSiteId)
   }
 
   async function deleteEquipment(equipmentId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        equipment: previous.equipment.filter((item) => item.id !== equipmentId),
-      }
-    })
+    await syncEquipmentDelete(tokens, equipmentId)
+    await refreshData()
   }
 
   async function attachEquipmentToSite(equipmentId: string, siteId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        equipment: previous.equipment.map((item) =>
-          item.id === equipmentId
-            ? {
-                ...item,
-                siteId,
-              }
-            : item,
-        ),
-      }
-    })
-  }
-
-  async function detachEquipmentFromSite(equipmentId: string): Promise<void> {
-    setData((previous) => {
-      if (!previous) {
-        return previous
-      }
-
-      return {
-        ...previous,
-        equipment: previous.equipment.map((item) =>
-          item.id === equipmentId
-            ? {
-                ...item,
-                siteId: undefined,
-              }
-            : item,
-        ),
-      }
-    })
+    await syncEquipmentSite(tokens, equipmentId, siteId)
+    await refreshData()
   }
 
   async function updateProfile(patch: Partial<UserProfile>): Promise<void> {
@@ -541,6 +320,8 @@ function App() {
             representative.accountId === user.representativeId
               ? {
                   ...representative,
+                  image: patch.image ?? representative.image,
+                  position: patch.position ?? representative.position,
                   phoneNumber: patch.phoneNumber ?? representative.phoneNumber,
                   email: patch.email ?? representative.email,
                 }
@@ -559,16 +340,45 @@ function App() {
     })
   }
 
+  function openPerson(accountId: string): void {
+    const targetEmployee = currentData.employees.find((employee) => employee.accountId === accountId)
+    if (targetEmployee) {
+      setSelectedEmployeeId(targetEmployee.accountId)
+      setSelectedRepresentativeKey(null)
+      setActiveModule('employees')
+      return
+    }
+
+    const targetCustomer = currentData.clients.find((client) =>
+      client.representatives.some((representative) => representative.accountId === accountId),
+    )
+    if (!targetCustomer) {
+      return
+    }
+
+    setSelectedRepresentativeKey(representativeRecordKey(targetCustomer.id, accountId))
+    setSelectedEmployeeId(null)
+    setActiveModule('clients')
+  }
+
   function handleSidebarModuleChange(module: ModuleKey): void {
     setActiveModule(module)
 
-    if (module === 'appeals') {
+    if (module !== 'appeals') {
       setSelectedAppealId(null)
     }
 
     if (module !== 'customers') {
       setSelectedSiteId(null)
       setSelectedCustomerId(null)
+    }
+
+    if (module !== 'employees') {
+      setSelectedEmployeeId(null)
+    }
+
+    if (module !== 'clients') {
+      setSelectedRepresentativeKey(null)
     }
   }
 
@@ -594,15 +404,20 @@ function App() {
             onAddComment={addComment}
             onLinkAppeal={linkAppeal}
             onUnlinkAppeal={unlinkAppeal}
+            onOpenPerson={openPerson}
             onOpenSite={(siteId) => {
               setSelectedSiteId(siteId)
               const site = currentData.sites.find((item) => item.id === siteId)
               setSelectedCustomerId(site?.clientId ?? null)
+              setSelectedEmployeeId(null)
+              setSelectedRepresentativeKey(null)
               setActiveModule('customers')
             }}
             onOpenCustomer={(customerId) => {
               setSelectedCustomerId(customerId)
               setSelectedSiteId(null)
+              setSelectedEmployeeId(null)
+              setSelectedRepresentativeKey(null)
               setActiveModule('customers')
             }}
           />
@@ -613,6 +428,8 @@ function App() {
           <EmployeesModule
             user={user}
             employees={currentData.employees}
+            selectedEmployeeId={selectedEmployeeId}
+            onSelectEmployee={setSelectedEmployeeId}
             onUpsertEmployee={upsertEmployee}
             onDeleteEmployee={deleteEmployee}
           />
@@ -623,6 +440,8 @@ function App() {
           <ClientsModule
             user={user}
             clients={currentData.clients}
+            selectedRecordKey={selectedRepresentativeKey}
+            onSelectRecord={setSelectedRepresentativeKey}
             onUpsertRepresentative={upsertRepresentative}
             onDeleteRepresentative={deleteRepresentative}
           />
@@ -646,7 +465,6 @@ function App() {
             onUpsertSite={upsertSite}
             onDeleteSite={deleteSite}
             onAttachEquipmentToSite={attachEquipmentToSite}
-            onDetachEquipmentFromSite={detachEquipmentFromSite}
           />
         )
 
@@ -656,7 +474,9 @@ function App() {
             user={user}
             equipment={currentData.equipment}
             sites={currentData.sites}
+            clients={currentData.clients}
             equipmentTypes={currentData.equipmentTypes}
+            products={currentData.products}
             onUpsertEquipment={upsertEquipment}
             onDeleteEquipment={deleteEquipment}
           />
@@ -668,9 +488,15 @@ function App() {
             key={user.id}
             user={user}
             appeals={currentData.appeals}
+            employees={currentData.employees}
+            clients={currentData.clients}
+            sites={currentData.sites}
+            products={currentData.products}
             onMoveAppeal={moveAppeal}
             onOpenAppeal={(appealId) => {
               setSelectedAppealId(appealId)
+              setSelectedEmployeeId(null)
+              setSelectedRepresentativeKey(null)
               setActiveModule('appeals')
             }}
           />

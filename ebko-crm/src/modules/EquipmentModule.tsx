@@ -1,5 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import type { EquipmentType, EquipmentUnit, Site, UserProfile } from '../types'
+import type {
+  ClientCompany,
+  EquipmentType,
+  EquipmentUnit,
+  ProductCatalogItem,
+  Site,
+  UserProfile,
+} from '../types'
 import { CustomSelect } from '../components/CustomSelect'
 import { canEditEquipment, canViewEquipment } from '../utils/permissions'
 
@@ -7,7 +14,9 @@ interface EquipmentModuleProps {
   user: UserProfile
   equipment: EquipmentUnit[]
   sites: Site[]
+  clients: ClientCompany[]
   equipmentTypes: EquipmentType[]
+  products: ProductCatalogItem[]
   onUpsertEquipment: (equipment: EquipmentUnit) => Promise<void>
   onDeleteEquipment: (equipmentId: string) => Promise<void>
 }
@@ -31,11 +40,12 @@ function nextSerialNumber(equipment: EquipmentUnit[]): string {
 function createEmptyEquipment(
   equipment: EquipmentUnit[],
   equipmentTypes: EquipmentType[],
+  sites: Site[],
 ): EquipmentUnit {
   return {
     id: nextEquipmentId(equipment),
     typeId: equipmentTypes[0]?.id ?? '',
-    siteId: undefined,
+    siteId: sites[0]?.id,
     serialNumber: nextSerialNumber(equipment),
     name: '',
     weight: 0,
@@ -47,13 +57,17 @@ export function EquipmentModule({
   user,
   equipment,
   sites,
+  clients,
   equipmentTypes,
+  products,
   onUpsertEquipment,
   onDeleteEquipment,
 }: EquipmentModuleProps) {
   const [selectedEquipmentId, setSelectedEquipmentId] = useState<string | null>(null)
   const [equipmentDraft, setEquipmentDraft] = useState<EquipmentUnit | null>(null)
   const [search, setSearch] = useState('')
+  const [clientFilter, setClientFilter] = useState('')
+  const [productFilter, setProductFilter] = useState('')
 
   const canEdit = canEditEquipment(user)
 
@@ -63,15 +77,25 @@ export function EquipmentModule({
   )
 
   const filteredEquipment = useMemo(() => {
-    if (!search.trim()) {
-      return visibleEquipment
-    }
-
-    const normalized = search.toLowerCase()
     return visibleEquipment.filter((item) => {
+      const site = sites.find((siteItem) => siteItem.id === item.siteId)
       const typeName =
         equipmentTypes.find((type) => type.id === item.typeId)?.name.toLowerCase() ?? ''
-      const siteName = sites.find((site) => site.id === item.siteId)?.name.toLowerCase() ?? ''
+      const siteName = site?.name.toLowerCase() ?? ''
+
+      if (clientFilter && site?.clientId !== clientFilter) {
+        return false
+      }
+
+      if (productFilter && !site?.productIds.includes(productFilter)) {
+        return false
+      }
+
+      if (!search.trim()) {
+        return true
+      }
+
+      const normalized = search.toLowerCase()
       return (
         item.name.toLowerCase().includes(normalized) ||
         item.serialNumber.toLowerCase().includes(normalized) ||
@@ -80,7 +104,7 @@ export function EquipmentModule({
         siteName.includes(normalized)
       )
     })
-  }, [search, visibleEquipment, equipmentTypes, sites])
+  }, [search, visibleEquipment, equipmentTypes, sites, clientFilter, productFilter])
 
   const selectedEquipment =
     (selectedEquipmentId
@@ -97,6 +121,30 @@ export function EquipmentModule({
     }
 
     return sites.find((item) => item.id === siteId)?.name ?? 'Площадка не найдена'
+  }
+
+  function resolveClientName(siteId?: string): string {
+    if (!siteId) {
+      return 'Не определён'
+    }
+
+    const site = sites.find((item) => item.id === siteId)
+    return clients.find((client) => client.id === site?.clientId)?.name ?? 'Не определён'
+  }
+
+  function resolveProductNames(siteId?: string): string {
+    if (!siteId) {
+      return 'Не определён'
+    }
+
+    const site = sites.find((item) => item.id === siteId)
+    if (!site || site.productIds.length === 0) {
+      return 'Не определён'
+    }
+
+    return site.productIds
+      .map((productId) => products.find((product) => product.id === productId)?.name ?? productId)
+      .join(', ')
   }
 
   async function saveEquipment(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -135,9 +183,10 @@ export function EquipmentModule({
             type="button"
             className="primary-button button-sm"
             onClick={() => {
-              setEquipmentDraft(createEmptyEquipment(equipment, equipmentTypes))
+              setEquipmentDraft(createEmptyEquipment(equipment, equipmentTypes, sites))
               setSelectedEquipmentId(null)
             }}
+            disabled={sites.length === 0}
           >
             Добавить оборудование
           </button>
@@ -145,12 +194,51 @@ export function EquipmentModule({
       </div>
 
       {!selectedEquipment && !equipmentDraft ? (
-        <input
-          className="text-input"
-          placeholder="Поиск по названию, серийному номеру, типу, площадке"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        <div className="form-grid">
+          <label>
+            Заказчик
+            <CustomSelect
+              value={clientFilter}
+              onChange={(event) => setClientFilter(event.target.value)}
+              options={[
+                { value: '', label: 'Все заказчики' },
+                ...clients.map((client) => ({
+                  value: client.id,
+                  label: client.name,
+                })),
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+
+          <label>
+            Продукт
+            <CustomSelect
+              value={productFilter}
+              onChange={(event) => setProductFilter(event.target.value)}
+              options={[
+                { value: '', label: 'Все продукты' },
+                ...products.map((product) => ({
+                  value: product.id,
+                  label: product.name,
+                })),
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+
+          <label>
+            Поиск
+            <input
+              className="text-input"
+              placeholder="По названию, серийному номеру, типу или площадке"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+        </div>
       ) : null}
 
       {equipmentDraft ? (
@@ -257,7 +345,6 @@ export function EquipmentModule({
                   )
                 }
                 options={[
-                  { value: '', label: 'Не привязано' },
                   ...sites.map((site) => ({
                     value: site.id,
                     label: `${site.name} (${site.address})`,
@@ -265,6 +352,7 @@ export function EquipmentModule({
                 ]}
                 placeholder={null}
                 showPlaceholder={false}
+                required
               />
             </label>
           </div>
@@ -330,6 +418,12 @@ export function EquipmentModule({
               <p>
                 <strong>Площадка:</strong> {resolveSiteName(selectedEquipment.siteId)}
               </p>
+              <p>
+                <strong>Заказчик:</strong> {resolveClientName(selectedEquipment.siteId)}
+              </p>
+              <p>
+                <strong>Продукты площадки:</strong> {resolveProductNames(selectedEquipment.siteId)}
+              </p>
             </div>
           </div>
 
@@ -372,6 +466,7 @@ export function EquipmentModule({
               </div>
               <p>Серийный номер: {item.serialNumber}</p>
               <p>Площадка: {resolveSiteName(item.siteId)}</p>
+              <p>Заказчик: {resolveClientName(item.siteId)}</p>
               <p>Вес: {item.weight} кг</p>
             </button>
           ))}

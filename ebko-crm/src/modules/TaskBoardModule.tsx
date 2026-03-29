@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { PRIORITY_ORDER, STATUS_LABELS, STATUS_ORDER } from '../constants'
+import { CRITICALITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, STATUS_ORDER } from '../constants'
 import type {
   Appeal,
   AppealCriticality,
   AppealStatus,
+  ClientCompany,
   DashboardSortField,
+  Employee,
+  ProductCatalogItem,
+  Site,
   TaskDashboard,
   TaskDashboardFilters,
   TaskDashboardSort,
@@ -17,6 +21,10 @@ import { canChangeStatus } from '../utils/permissions'
 interface TaskBoardModuleProps {
   user: UserProfile
   appeals: Appeal[]
+  employees: Employee[]
+  clients: ClientCompany[]
+  sites: Site[]
+  products: ProductCatalogItem[]
   onMoveAppeal: (appealId: string, nextStatus: AppealStatus) => Promise<void>
   onOpenAppeal: (appealId: string) => void
 }
@@ -114,6 +122,10 @@ function moveById<T extends { id: string }>(items: T[], sourceId: string, target
 export function TaskBoardModule({
   user,
   appeals,
+  employees,
+  clients,
+  sites,
+  products,
   onMoveAppeal,
   onOpenAppeal,
 }: TaskBoardModuleProps) {
@@ -142,7 +154,7 @@ export function TaskBoardModule({
       return appeals.filter((appeal) => Boolean(user.clientId && appeal.clientId === user.clientId))
     }
 
-    return appeals.filter((appeal) => appeal.responsibleId === user.id)
+    return appeals.filter((appeal) => appeal.responsibleId === user.id || appeal.createdBy === user.id)
   }, [appeals, user])
 
   const selectedDashboard =
@@ -152,6 +164,15 @@ export function TaskBoardModule({
     if (!selectedDashboard) {
       return []
     }
+
+    const resolveEmployeeName = (accountId?: string): string =>
+      employees.find((employee) => employee.accountId === accountId)?.fullName ?? ''
+    const resolveClientName = (clientId: string): string =>
+      clients.find((client) => client.id === clientId)?.name ?? ''
+    const resolveSiteName = (siteId?: string): string =>
+      sites.find((site) => site.id === siteId)?.name ?? ''
+    const resolveProductName = (productId?: string): string =>
+      products.find((product) => product.id === productId)?.name ?? ''
 
     const filtered = visibleAppeals.filter((appeal) => {
       if (
@@ -174,7 +195,17 @@ export function TaskBoardModule({
 
       if (selectedDashboard.filters.search.trim()) {
         const normalized = selectedDashboard.filters.search.toLowerCase()
-        const haystack = `${appeal.title} ${appeal.description}`.toLowerCase()
+        const haystack = [
+          appeal.title,
+          appeal.description,
+          resolveClientName(appeal.clientId),
+          resolveSiteName(appeal.siteId),
+          resolveProductName(appeal.productId),
+          resolveEmployeeName(appeal.responsibleId),
+          resolveEmployeeName(appeal.createdBy),
+        ]
+          .join(' ')
+          .toLowerCase()
         if (!haystack.includes(normalized)) {
           return false
         }
@@ -187,7 +218,7 @@ export function TaskBoardModule({
       const direction = selectedDashboard.sort.direction === 'asc' ? 1 : -1
       return compareByField(left, right, selectedDashboard.sort.field) * direction
     })
-  }, [selectedDashboard, visibleAppeals])
+  }, [clients, employees, products, selectedDashboard, sites, visibleAppeals])
 
   function updateSelectedDashboard(
     updater: (dashboard: TaskDashboard) => TaskDashboard,
@@ -412,7 +443,7 @@ export function TaskBoardModule({
           Поиск
           <input
             className="text-input"
-            placeholder="По заголовку или описанию"
+            placeholder="По заголовку, описанию, заказчику, площадке, продукту, автору или ответственному"
             value={selectedDashboard.filters.search}
             onChange={(event) =>
               updateSelectedDashboard((dashboard) => ({
@@ -482,7 +513,7 @@ export function TaskBoardModule({
                     </button>
                     <p>{appeal.description.slice(0, 90)}...</p>
                     <div className="card-row muted">
-                      <span>{appeal.criticalityId}</span>
+                      <span>{CRITICALITY_LABELS[appeal.criticalityId]}</span>
                       <span>Обновлено: {formatDateTime(appeal.updatedAt)}</span>
                     </div>
                   </div>

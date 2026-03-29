@@ -11,6 +11,8 @@ export type ModuleKey =
 
 export type AppealType = 'KTP' | 'WFM'
 
+export type AppealLinkType = 'related' | 'subtask' | 'parent_for' | 'subtask_for'
+
 export type AppealStatus =
   | 'Created'
   | 'Opened'
@@ -90,6 +92,11 @@ export interface AppealComment {
   files: FileAttachment[]
 }
 
+export interface AppealLink {
+  linkedAppealId: string
+  relationType: AppealLinkType
+}
+
 export interface Appeal {
   id: string
   title: string
@@ -106,6 +113,7 @@ export interface Appeal {
   createdAt: string
   updatedAt: string
   linkedTicketIds: string[]
+  links?: AppealLink[]
   comments: AppealComment[]
 }
 
@@ -127,6 +135,9 @@ export interface ClientRepresentative {
   accountId: string
   clientId: string
   fullName: string
+  image: string
+  birthDate: string
+  position: string
   phoneNumber: string
   email: string
   login: string
