@@ -35,6 +35,8 @@ var (
 	testDBID uint64
 )
 
+const samplePNGDataURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
+
 type authTokens struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -143,7 +145,7 @@ type siteResponse struct {
 type equipmentResponse struct {
 	ID           int64   `json:"id"`
 	TypeID       int     `json:"type_id"`
-	SiteID       int64   `json:"site_id"`
+	SiteID       *int64  `json:"site_id,omitempty"`
 	SerialNumber *string `json:"serial_number,omitempty"`
 	Name         string  `json:"name"`
 	Weight       *string `json:"weight,omitempty"`

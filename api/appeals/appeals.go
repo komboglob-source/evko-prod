@@ -103,6 +103,10 @@ const (
 	appealLinkTypeSubtask    = "subtask"
 	appealLinkTypeParentFor  = "parent_for"
 	appealLinkTypeSubtaskFor = "subtask_for"
+
+	appealLockedMessage          = "appeal is verified and cannot be changed"
+	appealImmutableFieldsMessage = "title and type cannot be changed"
+	appealPendingSubtasksMessage = "parent appeal cannot be completed before all subtasks are done"
 )
 
 type scanner interface {
@@ -395,6 +399,28 @@ func UpdateAppealHandler(w http.ResponseWriter, r *http.Request, appealID int64)
 		return
 	}
 
+	currentStatusName, err := statusNameByID(current.StatusID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if currentStatusName == "Verified" {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+	if body.Title != nil && strings.TrimSpace(*body.Title) != current.Title {
+		http.Error(w, appealImmutableFieldsMessage, http.StatusBadRequest)
+		return
+	}
+	if body.TypeID != nil && *body.TypeID != current.TypeID {
+		http.Error(w, appealImmutableFieldsMessage, http.StatusBadRequest)
+		return
+	}
+
 	nextTypeID := current.TypeID
 	if body.TypeID != nil {
 		nextTypeID = *body.TypeID
@@ -423,6 +449,35 @@ func UpdateAppealHandler(w http.ResponseWriter, r *http.Request, appealID int64)
 	if body.ResponsibleID != nil {
 		nextResponsibleID = body.ResponsibleID
 	}
+	autoOpenOnAssignment := shouldAutoOpenAppealOnAssignment(current, nextResponsibleID, currentStatusName)
+	if autoOpenOnAssignment {
+		nextStatusID, err = statusIDByName("Opened")
+		if err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	nextStatusName, err := statusNameByID(nextStatusID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if nextStatusName == "Done" || nextStatusName == "Verified" {
+		hasIncompleteSubtasks, err := appealHasIncompleteSubtasks(appealID)
+		if err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		if hasIncompleteSubtasks {
+			http.Error(w, appealPendingSubtasksMessage, http.StatusBadRequest)
+			return
+		}
+	}
 
 	if !typeExists(nextTypeID) || !statusExists(nextStatusID) || !criticalityExists(nextCriticalityID) || !clientExists(nextClientID) {
 		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
@@ -446,17 +501,11 @@ func UpdateAppealHandler(w http.ResponseWriter, r *http.Request, appealID int64)
 		setClauses = append(setClauses, clause+" = $"+strconv.Itoa(len(args)))
 	}
 
-	if body.Title != nil {
-		addSet("title", strings.TrimSpace(*body.Title))
-	}
 	if body.Description != nil {
 		addSet("description", strings.TrimSpace(*body.Description))
 	}
-	if body.TypeID != nil {
-		addSet("type_id", *body.TypeID)
-	}
-	if body.StatusID != nil {
-		addSet("status_id", *body.StatusID)
+	if body.StatusID != nil || autoOpenOnAssignment {
+		addSet("status_id", nextStatusID)
 	}
 	if body.CriticalityID != nil {
 		addSet("criticality_id", *body.CriticalityID)
@@ -596,6 +645,16 @@ func ListCommentsHandler(w http.ResponseWriter, r *http.Request, appealID int64)
 }
 
 func CreateCommentHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+
 	var body createCommentRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -643,6 +702,16 @@ func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, comm
 		return
 	}
 
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+
 	var body updateCommentRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -663,7 +732,7 @@ func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, comm
 	setClauses = append(setClauses, "updated_at = $"+strconv.Itoa(len(args)))
 	args = append(args, commentID, appealID)
 
-	_, err := database.DB.Exec(`
+	_, err = database.DB.Exec(`
 		UPDATE "tasks"."Comments"
 		SET `+strings.Join(setClauses, ", ")+`
 		WHERE id = $`+strconv.Itoa(len(args)-1)+` AND ticket_id = $`+strconv.Itoa(len(args)), args...)
@@ -682,6 +751,16 @@ func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, comm
 }
 
 func DeleteCommentHandler(w http.ResponseWriter, r *http.Request, appealID, commentID int64) {
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+
 	result, err := database.DB.Exec(`
 		DELETE FROM "tasks"."Comments"
 		WHERE id = $1 AND ticket_id = $2
@@ -741,6 +820,16 @@ func ListLinksHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
 }
 
 func CreateLinkHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+
 	var body linkAppealRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -806,6 +895,16 @@ func CreateLinkHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
 }
 
 func DeleteLinkHandler(w http.ResponseWriter, r *http.Request, appealID, linkedAppealID int64) {
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+
 	result, err := database.DB.Exec(`
 		DELETE FROM "tasks"."ConnectedTickets"
 		WHERE (first_task_id = $1 AND second_task_id = $2)
@@ -858,6 +957,16 @@ func ReactionsHandler(w http.ResponseWriter, r *http.Request, path string, appea
 }
 
 func AddReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commentID int64) {
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
+
 	var body addReactionRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -897,7 +1006,15 @@ func AddReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commen
 }
 
 func DeleteReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commentID, reactionID int64) {
-	_ = appealID
+	verified, err := isAppealVerified(appealID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if verified {
+		http.Error(w, appealLockedMessage, http.StatusBadRequest)
+		return
+	}
 
 	result, err := database.DB.Exec(`
 		DELETE FROM "tasks"."CommentsReactions"
@@ -1182,6 +1299,59 @@ func statusIDByName(name string) (int, error) {
 		WHERE name = $1
 	`, name).Scan(&statusID)
 	return statusID, err
+}
+
+func statusNameByID(statusID int) (string, error) {
+	var statusName string
+	err := database.DB.QueryRow(`
+		SELECT name
+		FROM "tasks"."Status"
+		WHERE id = $1
+	`, statusID).Scan(&statusName)
+	return statusName, err
+}
+
+func isAppealVerified(appealID int64) (bool, error) {
+	var statusName string
+	err := database.DB.QueryRow(`
+		SELECT status.name
+		FROM "tasks"."Tickets" tickets
+		JOIN "tasks"."Status" status ON status.id = tickets.status_id
+		WHERE tickets.id = $1
+	`, appealID).Scan(&statusName)
+	if err != nil {
+		return false, err
+	}
+
+	return statusName == "Verified", nil
+}
+
+func shouldAutoOpenAppealOnAssignment(current appealResponse, nextResponsibleID *int64, currentStatusName string) bool {
+	if currentStatusName != "Created" || nextResponsibleID == nil {
+		return false
+	}
+
+	if current.ResponsibleID == nil {
+		return true
+	}
+
+	return *current.ResponsibleID != *nextResponsibleID
+}
+
+func appealHasIncompleteSubtasks(appealID int64) (bool, error) {
+	var hasIncomplete bool
+	err := database.DB.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM "tasks"."ConnectedTickets" connected
+			JOIN "tasks"."Tickets" tickets ON tickets.id = connected.second_task_id
+			JOIN "tasks"."Status" status ON status.id = tickets.status_id
+			WHERE connected.first_task_id = $1
+				AND connected.relation_type = $2
+				AND status.name NOT IN ('Done', 'Verified')
+		)
+	`, appealID, appealLinkTypeParentFor).Scan(&hasIncomplete)
+	return hasIncomplete, err
 }
 
 func validateAppealConsistency(clientID int64, siteID *int64, productID *int, responsibleID *int64) bool {

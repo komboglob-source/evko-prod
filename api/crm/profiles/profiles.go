@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"crm_be/api/utils"
 	"crm_be/database"
@@ -34,6 +33,15 @@ type patchProfileMeRequest struct {
 	Image       *string `json:"image"`
 	BirthDate   *string `json:"birth_date"`
 	Position    *string `json:"position"`
+}
+
+func handleProfileUniqueViolation(w http.ResponseWriter, err error) bool {
+	if !utils.IsUniqueViolation(err) {
+		return false
+	}
+
+	http.Error(w, "phone number or email already exists", http.StatusConflict)
+	return true
 }
 
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -105,15 +113,20 @@ func PatchProfileMeHandler(w http.ResponseWriter, r *http.Request) {
 		argPos++
 	}
 	if body.Image != nil {
+		imageBytes, err := utils.DecodeImageBase64(body.Image)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		setClauses = append(setClauses, "image = $"+itoa(argPos))
-		args = append(args, []byte(strings.TrimSpace(*body.Image)))
+		args = append(args, imageBytes)
 		argPos++
 	}
 	if body.BirthDate != nil {
 		if strings.TrimSpace(*body.BirthDate) == "" {
 			setClauses = append(setClauses, "birth_date = NULL")
 		} else {
-			parsedDate, err := time.Parse("2006-01-02", strings.TrimSpace(*body.BirthDate))
+			parsedDate, err := utils.ParseOptionalBirthDate(body.BirthDate)
 			if err != nil {
 				http.Error(w, "invalid birth_date", http.StatusBadRequest)
 				return
@@ -136,6 +149,9 @@ func PatchProfileMeHandler(w http.ResponseWriter, r *http.Request) {
 			SET `+strings.Join(setClauses, ", ")+`
 			WHERE account_id = $`+itoa(argPos), args...)
 		if err != nil {
+			if handleProfileUniqueViolation(w, err) {
+				return
+			}
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}

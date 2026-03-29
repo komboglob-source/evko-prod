@@ -38,6 +38,15 @@ type upsertEmployeeRequest struct {
 	HireDate    *string `json:"hire_date"`
 }
 
+func handleEmployeeUniqueViolation(w http.ResponseWriter, err error) bool {
+	if !utils.IsUniqueViolation(err) {
+		return false
+	}
+
+	http.Error(w, "login, phone number or email already exists", http.StatusConflict)
+	return true
+}
+
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	pathSegment := utils.GetFirstPathSegment(path)
 	if pathSegment == "" {
@@ -227,14 +236,19 @@ func CreateEmployeeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	birthDate, err := parseOptionalDate(body.BirthDate)
+	birthDate, err := utils.ParseOptionalBirthDate(body.BirthDate)
 	if err != nil {
 		http.Error(w, "invalid birth_date", http.StatusBadRequest)
 		return
 	}
-	hireDate, err := parseOptionalDate(body.HireDate)
+	hireDate, err := utils.ParseOptionalDate(body.HireDate)
 	if err != nil {
 		http.Error(w, "invalid hire_date", http.StatusBadRequest)
+		return
+	}
+	imageBytes, err := utils.DecodeImageBase64(body.Image)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -252,6 +266,9 @@ func CreateEmployeeHandler(w http.ResponseWriter, r *http.Request) {
 		RETURNING id
 	`, strings.TrimSpace(*body.Login), passwordHash, roleID).Scan(&accountID)
 	if err != nil {
+		if handleEmployeeUniqueViolation(w, err) {
+			return
+		}
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -261,8 +278,11 @@ func CreateEmployeeHandler(w http.ResponseWriter, r *http.Request) {
 			account_id, full_name, phone_number, email, image, birth_date, position
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, accountID, strings.TrimSpace(*body.FullName), strings.TrimSpace(*body.PhoneNumber), strings.TrimSpace(*body.Email), imageBytes(body.Image), birthDate, optionalTrimmedString(body.Position))
+	`, accountID, strings.TrimSpace(*body.FullName), strings.TrimSpace(*body.PhoneNumber), strings.TrimSpace(*body.Email), imageBytes, birthDate, optionalTrimmedString(body.Position))
 	if err != nil {
+		if handleEmployeeUniqueViolation(w, err) {
+			return
+		}
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -340,6 +360,9 @@ func UpdateEmployeeHandler(w http.ResponseWriter, r *http.Request, accountID int
 			SET `+strings.Join(accountSet, ", ")+`
 			WHERE id = $`+strconv.Itoa(accountPos), accountArgs...)
 		if err != nil {
+			if handleEmployeeUniqueViolation(w, err) {
+				return
+			}
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -365,15 +388,20 @@ func UpdateEmployeeHandler(w http.ResponseWriter, r *http.Request, accountID int
 		profilePos++
 	}
 	if body.Image != nil {
+		imageBytes, err := utils.DecodeImageBase64(body.Image)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		profileSet = append(profileSet, "image = $"+strconv.Itoa(profilePos))
-		profileArgs = append(profileArgs, imageBytes(body.Image))
+		profileArgs = append(profileArgs, imageBytes)
 		profilePos++
 	}
 	if body.BirthDate != nil {
 		if strings.TrimSpace(*body.BirthDate) == "" {
 			profileSet = append(profileSet, "birth_date = NULL")
 		} else {
-			birthDate, err := parseOptionalDate(body.BirthDate)
+			birthDate, err := utils.ParseOptionalBirthDate(body.BirthDate)
 			if err != nil {
 				http.Error(w, "invalid birth_date", http.StatusBadRequest)
 				return
@@ -395,6 +423,9 @@ func UpdateEmployeeHandler(w http.ResponseWriter, r *http.Request, accountID int
 			SET `+strings.Join(profileSet, ", ")+`
 			WHERE account_id = $`+strconv.Itoa(profilePos), profileArgs...)
 		if err != nil {
+			if handleEmployeeUniqueViolation(w, err) {
+				return
+			}
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -405,7 +436,7 @@ func UpdateEmployeeHandler(w http.ResponseWriter, r *http.Request, accountID int
 		if strings.TrimSpace(*body.HireDate) == "" {
 			hireDate = nil
 		} else {
-			parsedDate, err := parseOptionalDate(body.HireDate)
+			parsedDate, err := utils.ParseOptionalDate(body.HireDate)
 			if err != nil {
 				http.Error(w, "invalid hire_date", http.StatusBadRequest)
 				return
@@ -546,32 +577,9 @@ func roleIDByName(role string) (int, error) {
 	return roleID, err
 }
 
-func parseOptionalDate(value *string) (any, error) {
-	if value == nil {
-		return nil, nil
-	}
-	if strings.TrimSpace(*value) == "" {
-		return nil, nil
-	}
-
-	parsedDate, err := time.Parse("2006-01-02", strings.TrimSpace(*value))
-	if err != nil {
-		return nil, err
-	}
-
-	return parsedDate, nil
-}
-
 func optionalTrimmedString(value *string) any {
 	if value == nil {
 		return nil
 	}
 	return strings.TrimSpace(*value)
-}
-
-func imageBytes(value *string) []byte {
-	if value == nil {
-		return nil
-	}
-	return []byte(strings.TrimSpace(*value))
 }

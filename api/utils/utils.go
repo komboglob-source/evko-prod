@@ -15,8 +15,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var allowedImageContentTypes = map[string]struct{}{
+	"image/png":  {},
+	"image/jpeg": {},
+	"image/gif":  {},
+	"image/webp": {},
+	"image/bmp":  {},
+}
 
 func StartsWith(s, prefix string) bool {
 	return (len(s) >= len(prefix)) && (s[:len(prefix)] == prefix)
@@ -177,6 +186,72 @@ func EncodePicToBase64(pic []byte) string {
 	return base64.StdEncoding.EncodeToString(pic)
 }
 
+func normalizeImageContentType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if index := strings.Index(value, ";"); index >= 0 {
+		value = value[:index]
+	}
+
+	switch value {
+	case "image/jpg":
+		return "image/jpeg"
+	default:
+		return value
+	}
+}
+
+func isAllowedImageContentType(value string) bool {
+	_, exists := allowedImageContentTypes[normalizeImageContentType(value)]
+	return exists
+}
+
+func DecodeImageBase64(value *string) ([]byte, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	rawValue := strings.TrimSpace(*value)
+	if rawValue == "" {
+		return nil, nil
+	}
+
+	if !strings.HasPrefix(strings.ToLower(rawValue), "data:") {
+		return nil, errors.New("image must be uploaded as base64 image data")
+	}
+
+	commaIndex := strings.Index(rawValue, ",")
+	if commaIndex < 0 {
+		return nil, errors.New("image must be uploaded as base64 image data")
+	}
+
+	meta := rawValue[:commaIndex]
+	payload := strings.TrimSpace(rawValue[commaIndex+1:])
+	if !strings.HasSuffix(strings.ToLower(meta), ";base64") {
+		return nil, errors.New("image must be uploaded as base64 image data")
+	}
+
+	contentType := normalizeImageContentType(strings.TrimPrefix(strings.SplitN(meta, ";", 2)[0], "data:"))
+	if !isAllowedImageContentType(contentType) {
+		return nil, errors.New("unsupported image type")
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, errors.New("invalid base64 image data")
+	}
+
+	detectedContentType := normalizeImageContentType(http.DetectContentType(decoded))
+	if !isAllowedImageContentType(detectedContentType) {
+		return nil, errors.New("unsupported image type")
+	}
+
+	if detectedContentType != contentType {
+		return nil, errors.New("image contents do not match image type")
+	}
+
+	return decoded, nil
+}
+
 func EncodeImage(pic []byte) string {
 	if len(pic) == 0 {
 		return ""
@@ -184,12 +259,60 @@ func EncodeImage(pic []byte) string {
 
 	if utf8.Valid(pic) {
 		value := string(pic)
-		if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "data:") {
+		if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "data:image/") {
 			return value
 		}
 	}
 
-	return "data:application/octet-stream;base64," + base64.StdEncoding.EncodeToString(pic)
+	contentType := normalizeImageContentType(http.DetectContentType(pic))
+	if !isAllowedImageContentType(contentType) {
+		return ""
+	}
+
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(pic)
+}
+
+func ParseOptionalDate(value *string) (*time.Time, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil, nil
+	}
+
+	parsedDate, err := time.Parse("2006-01-02", strings.TrimSpace(*value))
+	if err != nil {
+		return nil, err
+	}
+
+	return &parsedDate, nil
+}
+
+func ParseOptionalBirthDate(value *string) (*time.Time, error) {
+	parsedDate, err := ParseOptionalDate(value)
+	if err != nil || parsedDate == nil {
+		return parsedDate, err
+	}
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	normalizedBirthDate := time.Date(
+		parsedDate.Year(),
+		parsedDate.Month(),
+		parsedDate.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	if normalizedBirthDate.After(today) {
+		return nil, errors.New("birth date cannot be in the future")
+	}
+
+	return parsedDate, nil
+}
+
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func WriteJSON(w http.ResponseWriter, status int, payload any) {

@@ -1,12 +1,15 @@
 package utils
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+const samplePNGDataURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
 
 func TestGetFirstPathSegment(t *testing.T) {
 	t.Parallel()
@@ -77,6 +80,11 @@ func TestEncodePicToBase64(t *testing.T) {
 func TestEncodeImage(t *testing.T) {
 	t.Parallel()
 
+	samplePNG, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(samplePNGDataURL, "data:image/png;base64,"))
+	if err != nil {
+		t.Fatalf("failed to decode sample png: %v", err)
+	}
+
 	cases := []struct {
 		name string
 		raw  []byte
@@ -84,8 +92,9 @@ func TestEncodeImage(t *testing.T) {
 	}{
 		{name: "empty", raw: nil, want: ""},
 		{name: "http url", raw: []byte("https://example.com/a.png"), want: "https://example.com/a.png"},
-		{name: "data url", raw: []byte("data:image/png;base64,abc"), want: "data:image/png;base64,abc"},
-		{name: "binary", raw: []byte{0x00, 0x01, 0x02}, want: "data:application/octet-stream;base64,AAEC"},
+		{name: "legacy data url", raw: []byte(samplePNGDataURL), want: samplePNGDataURL},
+		{name: "image bytes", raw: samplePNG, want: samplePNGDataURL},
+		{name: "invalid binary", raw: []byte{0x00, 0x01, 0x02}, want: ""},
 	}
 
 	for _, tc := range cases {
@@ -97,6 +106,60 @@ func TestEncodeImage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeImageBase64(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty image", func(t *testing.T) {
+		t.Parallel()
+
+		empty := ""
+		got, err := DecodeImageBase64(&empty)
+		if err != nil {
+			t.Fatalf("DecodeImageBase64 returned error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("DecodeImageBase64(empty) returned %d bytes, want empty", len(got))
+		}
+	})
+
+	t.Run("valid image", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := DecodeImageBase64(pointerTo(samplePNGDataURL))
+		if err != nil {
+			t.Fatalf("DecodeImageBase64 returned error: %v", err)
+		}
+		if len(got) == 0 {
+			t.Fatal("DecodeImageBase64 returned empty bytes for valid image")
+		}
+		if encoded := EncodeImage(got); encoded != samplePNGDataURL {
+			t.Fatalf("EncodeImage(DecodeImageBase64(...)) = %q, want %q", encoded, samplePNGDataURL)
+		}
+	})
+
+	t.Run("rejects non data url", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := DecodeImageBase64(pointerTo("https://example.com/photo.png"))
+		if err == nil {
+			t.Fatal("DecodeImageBase64 should reject plain urls")
+		}
+	})
+
+	t.Run("rejects non image type", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := DecodeImageBase64(pointerTo("data:text/plain;base64,aGVsbG8="))
+		if err == nil {
+			t.Fatal("DecodeImageBase64 should reject non-image content types")
+		}
+	})
+}
+
+func pointerTo(value string) *string {
+	return &value
 }
 
 func TestWriteJSON(t *testing.T) {

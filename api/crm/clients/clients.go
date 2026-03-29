@@ -55,6 +55,15 @@ type clientListFilters struct {
 	Query                   string
 }
 
+func handleClientUniqueViolation(w http.ResponseWriter, err error) bool {
+	if !utils.IsUniqueViolation(err) {
+		return false
+	}
+
+	http.Error(w, "client with same data already exists", http.StatusConflict)
+	return true
+}
+
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	pathSegment := utils.GetFirstPathSegment(path)
 	if pathSegment == "" {
@@ -123,13 +132,29 @@ func CreateClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	name := strings.TrimSpace(*body.Name)
+	address := strings.TrimSpace(*body.Address)
+
+	exists, err := clientWithSameDataExists(name, address, nil)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		http.Error(w, "client with same data already exists", http.StatusConflict)
+		return
+	}
+
 	var clientID int64
-	err := database.DB.QueryRow(`
+	err = database.DB.QueryRow(`
 		INSERT INTO "crm"."Clients" (name, address, ceo_id)
 		VALUES ($1, $2, $3)
 		RETURNING id
-	`, strings.TrimSpace(*body.Name), strings.TrimSpace(*body.Address), body.CEOID).Scan(&clientID)
+	`, name, address, body.CEOID).Scan(&clientID)
 	if err != nil {
+		if handleClientUniqueViolation(w, err) {
+			return
+		}
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -144,9 +169,38 @@ func CreateClientHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func UpdateClientHandler(w http.ResponseWriter, r *http.Request, clientID int64) {
+	currentClient, err := getClientByID(clientID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "client not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
 	var body upsertClientRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+
+	nextName := currentClient.Name
+	if body.Name != nil {
+		nextName = strings.TrimSpace(*body.Name)
+	}
+	nextAddress := currentClient.Address
+	if body.Address != nil {
+		nextAddress = strings.TrimSpace(*body.Address)
+	}
+
+	exists, err := clientWithSameDataExists(nextName, nextAddress, &clientID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		http.Error(w, "client with same data already exists", http.StatusConflict)
 		return
 	}
 
@@ -190,6 +244,9 @@ func UpdateClientHandler(w http.ResponseWriter, r *http.Request, clientID int64)
 		SET `+strings.Join(setClauses, ", ")+`
 		WHERE id = $`+strconv.Itoa(argPos), args...)
 	if err != nil {
+		if handleClientUniqueViolation(w, err) {
+			return
+		}
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -551,4 +608,24 @@ func buildClientFilterArgs(filters clientListFilters) []any {
 		args = append(args, "%"+filters.Query+"%")
 	}
 	return args
+}
+
+func clientWithSameDataExists(name string, address string, excludeID *int64) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM "crm"."Clients"
+			WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+			  AND LOWER(TRIM(address)) = LOWER(TRIM($2))
+	`
+	args := []any{name, address}
+	if excludeID != nil {
+		query += ` AND id <> $3`
+		args = append(args, *excludeID)
+	}
+	query += `)`
+
+	var exists bool
+	err := database.DB.QueryRow(query, args...).Scan(&exists)
+	return exists, err
 }

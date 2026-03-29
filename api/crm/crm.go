@@ -335,7 +335,7 @@ func listReactions() ([]Reaction, error) {
 			return nil, err
 		}
 
-		item.Picture = utils.EncodePicToBase64(picture)
+		item.Picture = utils.EncodeImage(picture)
 		items = append(items, item)
 	}
 

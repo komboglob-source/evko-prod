@@ -26,6 +26,10 @@ type upsertSiteRequest struct {
 	ProductIDs    *[]int  `json:"product_ids"`
 }
 
+func handleSiteDuplicate(w http.ResponseWriter) {
+	http.Error(w, "site with same data already exists", http.StatusConflict)
+}
+
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	pathSegment := utils.GetFirstPathSegment(path)
 	if pathSegment == "" {
@@ -196,6 +200,18 @@ func CreateSiteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = clientID
 
+	name := strings.TrimSpace(*body.Name)
+	address := strings.TrimSpace(*body.Address)
+	exists, err := siteWithSameDataExists(*body.ResponsibleID, name, address, nil)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		handleSiteDuplicate(w)
+		return
+	}
+
 	tx, err := database.DB.Begin()
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
@@ -208,7 +224,7 @@ func CreateSiteHandler(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO "crm"."Sites" (responsible_id, name, address)
 		VALUES ($1, $2, $3)
 		RETURNING id
-	`, *body.ResponsibleID, strings.TrimSpace(*body.Name), strings.TrimSpace(*body.Address)).Scan(&siteID)
+	`, *body.ResponsibleID, name, address).Scan(&siteID)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -258,9 +274,27 @@ func UpdateSiteHandler(w http.ResponseWriter, r *http.Request, siteID int64) {
 	if body.ProductIDs != nil {
 		nextProductIDs = *body.ProductIDs
 	}
+	nextName := currentSite.Name
+	if body.Name != nil {
+		nextName = strings.TrimSpace(*body.Name)
+	}
+	nextAddress := currentSite.Address
+	if body.Address != nil {
+		nextAddress = strings.TrimSpace(*body.Address)
+	}
 
 	if _, err := clientIDByResponsible(nextResponsibleID); err != nil || !allProductsExist(nextProductIDs) {
 		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
+		return
+	}
+
+	exists, err := siteWithSameDataExists(nextResponsibleID, nextName, nextAddress, &siteID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		handleSiteDuplicate(w)
 		return
 	}
 
@@ -444,4 +478,25 @@ func replaceSiteProductsTx(tx *sql.Tx, siteID int64, productIDs []int) error {
 	}
 
 	return nil
+}
+
+func siteWithSameDataExists(responsibleID int64, name string, address string, excludeID *int64) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM "crm"."Sites"
+			WHERE responsible_id = $1
+			  AND LOWER(TRIM(name)) = LOWER(TRIM($2))
+			  AND LOWER(TRIM(address)) = LOWER(TRIM($3))
+	`
+	args := []any{responsibleID, name, address}
+	if excludeID != nil {
+		query += ` AND id <> $4`
+		args = append(args, *excludeID)
+	}
+	query += `)`
+
+	var exists bool
+	err := database.DB.QueryRow(query, args...).Scan(&exists)
+	return exists, err
 }

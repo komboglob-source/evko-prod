@@ -2,6 +2,7 @@ package nri
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,20 +20,42 @@ type equipmentTypeResponse struct {
 type equipmentResponse struct {
 	ID           int64   `json:"id"`
 	TypeID       int     `json:"type_id"`
-	SiteID       int64   `json:"site_id"`
+	SiteID       *int64  `json:"site_id,omitempty"`
 	SerialNumber *string `json:"serial_number,omitempty"`
 	Name         string  `json:"name"`
 	Weight       *string `json:"weight,omitempty"`
 	Description  string  `json:"description"`
 }
 
+type optionalInt64Field struct {
+	Set   bool
+	Value *int64
+}
+
+func (field *optionalInt64Field) UnmarshalJSON(data []byte) error {
+	field.Set = true
+
+	if string(data) == "null" {
+		field.Value = nil
+		return nil
+	}
+
+	var value int64
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+
+	field.Value = &value
+	return nil
+}
+
 type upsertEquipmentRequest struct {
-	TypeID       *int    `json:"type_id"`
-	SiteID       *int64  `json:"site_id"`
-	SerialNumber *string `json:"serial_number"`
-	Name         *string `json:"name"`
-	Weight       *string `json:"weight"`
-	Description  *string `json:"description"`
+	TypeID       *int               `json:"type_id"`
+	SiteID       optionalInt64Field `json:"site_id"`
+	SerialNumber *string            `json:"serial_number"`
+	Name         *string            `json:"name"`
+	Weight       *string            `json:"weight"`
+	Description  *string            `json:"description"`
 }
 
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -121,8 +144,8 @@ func ListEquipmentHandler(w http.ResponseWriter, r *http.Request) {
 			equipment.weight,
 			COALESCE(equipment.description, '')
 		FROM "nri"."Equipment" equipment
-		JOIN "crm"."Sites" sites ON sites.id = equipment.site_id
-		JOIN "crm"."Representatives" representatives ON representatives.account_id = sites.responsible_id
+		LEFT JOIN "crm"."Sites" sites ON sites.id = equipment.site_id
+		LEFT JOIN "crm"."Representatives" representatives ON representatives.account_id = sites.responsible_id
 		LEFT JOIN "crm"."Clients" clients ON clients.id = representatives.client_id
 		LEFT JOIN "nri"."Equipment_Types" equipment_types ON equipment_types.id = equipment.type_id
 	`
@@ -254,13 +277,18 @@ func CreateEquipmentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.TypeID == nil || body.SiteID == nil || body.Name == nil {
+	if body.TypeID == nil || body.Name == nil {
 		http.Error(w, "missing required fields", http.StatusBadRequest)
 		return
 	}
-	if !equipmentTypeExists(*body.TypeID) || !siteExists(*body.SiteID) {
+	if !equipmentTypeExists(*body.TypeID) || (body.SiteID.Set && body.SiteID.Value != nil && !siteExists(*body.SiteID.Value)) {
 		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
 		return
+	}
+
+	var siteID any
+	if body.SiteID.Value != nil {
+		siteID = *body.SiteID.Value
 	}
 
 	var equipmentID int64
@@ -268,7 +296,7 @@ func CreateEquipmentHandler(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO "nri"."Equipment" (type_id, site_id, serial_number, name, weight, description)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, *body.TypeID, *body.SiteID, optionalTrimmedString(body.SerialNumber), strings.TrimSpace(*body.Name), optionalTrimmedString(body.Weight), optionalTrimmedString(body.Description)).Scan(&equipmentID)
+	`, *body.TypeID, siteID, optionalTrimmedString(body.SerialNumber), strings.TrimSpace(*body.Name), optionalTrimmedString(body.Weight), optionalTrimmedString(body.Description)).Scan(&equipmentID)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -304,11 +332,15 @@ func UpdateEquipmentHandler(w http.ResponseWriter, r *http.Request, equipmentID 
 	if body.TypeID != nil {
 		nextTypeID = *body.TypeID
 	}
-	nextSiteID := current.SiteID
-	if body.SiteID != nil {
-		nextSiteID = *body.SiteID
+	var nextSiteID *int64
+	if current.SiteID != nil {
+		value := *current.SiteID
+		nextSiteID = &value
 	}
-	if !equipmentTypeExists(nextTypeID) || !siteExists(nextSiteID) {
+	if body.SiteID.Set {
+		nextSiteID = body.SiteID.Value
+	}
+	if !equipmentTypeExists(nextTypeID) || (nextSiteID != nil && !siteExists(*nextSiteID)) {
 		http.Error(w, "all fields are inconsistent", http.StatusBadRequest)
 		return
 	}
@@ -322,9 +354,13 @@ func UpdateEquipmentHandler(w http.ResponseWriter, r *http.Request, equipmentID 
 		args = append(args, *body.TypeID)
 		argPos++
 	}
-	if body.SiteID != nil {
+	if body.SiteID.Set {
 		setClauses = append(setClauses, "site_id = $"+strconv.Itoa(argPos))
-		args = append(args, *body.SiteID)
+		if body.SiteID.Value == nil {
+			args = append(args, nil)
+		} else {
+			args = append(args, *body.SiteID.Value)
+		}
 		argPos++
 	}
 	if body.SerialNumber != nil {
@@ -420,13 +456,18 @@ type scanner interface {
 func scanEquipment(row scanner) (equipmentResponse, error) {
 	var (
 		item         equipmentResponse
+		siteID       sql.NullInt64
 		serialNumber sql.NullString
 		weight       sql.NullString
 	)
 
-	err := row.Scan(&item.ID, &item.TypeID, &item.SiteID, &serialNumber, &item.Name, &weight, &item.Description)
+	err := row.Scan(&item.ID, &item.TypeID, &siteID, &serialNumber, &item.Name, &weight, &item.Description)
 	if err != nil {
 		return equipmentResponse{}, err
+	}
+	if siteID.Valid {
+		value := siteID.Int64
+		item.SiteID = &value
 	}
 	if serialNumber.Valid {
 		item.SerialNumber = &serialNumber.String

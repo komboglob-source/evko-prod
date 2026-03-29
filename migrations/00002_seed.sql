@@ -147,37 +147,37 @@ INSERT INTO "auth"."Accounts" (login, password_hash, role_id) VALUES
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Egor Vlasov', '+7 (900) 100-10-10', 'admin@ebko.local', NULL, DATE '1988-05-16', 'CRM Administrator'
+SELECT id, 'Егор Власов', '+7 (900) 100-10-10', 'admin@ebko.local', NULL, DATE '1988-05-16', 'Администратор CRM'
 FROM "auth"."Accounts" WHERE login = 'Admin'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Ilya Novikov', '+7 (900) 101-10-10', 'ktp@ebko.local', NULL, DATE '1994-07-09', 'KTP Operator'
+SELECT id, 'Илья Новиков', '+7 (900) 101-10-10', 'ktp@ebko.local', NULL, DATE '1994-07-09', 'Оператор КТП'
 FROM "auth"."Accounts" WHERE login = 'Ktp'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Mark Gromov', '+7 (900) 102-10-10', 'wfm@ebko.local', NULL, DATE '1996-11-03', 'WFM Engineer'
+SELECT id, 'Марк Громов', '+7 (900) 102-10-10', 'wfm@ebko.local', NULL, DATE '1996-11-03', 'Инженер WFM'
 FROM "auth"."Accounts" WHERE login = 'Wfm'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Irina Smirnova', '+7 (903) 111-11-11', 'i.smirnova@alpha-log.ru', NULL, DATE '1991-03-11', 'Client Representative'
+SELECT id, 'Ирина Смирнова', '+7 (903) 111-11-11', 'i.smirnova@alpha-log.ru', NULL, DATE '1991-03-11', 'Представитель заказчика'
 FROM "auth"."Accounts" WHERE login = 'Client'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Oleg Ebko', '+7 (900) 104-10-10', 'ebko@ebko.local', NULL, DATE '1982-12-14', 'EBKO Director'
+SELECT id, 'Олег ЕБКО', '+7 (900) 104-10-10', 'ebko@ebko.local', NULL, DATE '1982-12-14', 'Генеральный директор ЕБКО'
 FROM "auth"."Accounts" WHERE login = 'Ebko'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Alexander Nesterov', '+7 (903) 111-11-12', 'a.nesterov@alpha-log.ru', NULL, DATE '1990-07-21', 'Client Representative'
+SELECT id, 'Александр Нестеров', '+7 (903) 111-11-12', 'a.nesterov@alpha-log.ru', NULL, DATE '1990-07-21', 'Представитель заказчика'
 FROM "auth"."Accounts" WHERE login = 'Client2'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "profiles"."Profiles" (account_id, full_name, phone_number, email, image, birth_date, position)
-SELECT id, 'Dmitriy Polyakov', '+7 (911) 123-45-67', 'd.polyakov@severnet.ru', NULL, DATE '1989-12-09', 'Client Representative'
+SELECT id, 'Дмитрий Поляков', '+7 (911) 123-45-67', 'd.polyakov@severnet.ru', NULL, DATE '1989-12-09', 'Представитель заказчика'
 FROM "auth"."Accounts" WHERE login = 'North'
 ON CONFLICT DO NOTHING;
 
@@ -198,8 +198,8 @@ SELECT id, DATE '2021-09-01' FROM "auth"."Accounts" WHERE login = 'Ebko'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "crm"."Clients" (id, name, address, ceo_id) VALUES
-    (1, 'Alpha Logistik', 'Moscow, Letnyaya 16', (SELECT id FROM "auth"."Accounts" WHERE login = 'Client')),
-    (2, 'Sever Net',      'Saint Petersburg, Rechnoy 7', (SELECT id FROM "auth"."Accounts" WHERE login = 'North'))
+    (1, 'Альфа Логистик', 'Москва, улица Летняя, 16', (SELECT id FROM "auth"."Accounts" WHERE login = 'Client')),
+    (2, 'Север Нет',      'Санкт-Петербург, Речной проспект, 7', (SELECT id FROM "auth"."Accounts" WHERE login = 'North'))
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "crm"."Representatives" (account_id, client_id)
@@ -215,9 +215,9 @@ SELECT id, 2 FROM "auth"."Accounts" WHERE login = 'North'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "crm"."Sites" (id, responsible_id, name, address) VALUES
-    (1, (SELECT id FROM "auth"."Accounts" WHERE login = 'Client'),  'Letnyaya 18', 'Moscow, Letnyaya 18, office 11'),
-    (2, (SELECT id FROM "auth"."Accounts" WHERE login = 'Client2'), 'Ilmenskaya 4', 'Moscow, Ilmenskaya 4'),
-    (3, (SELECT id FROM "auth"."Accounts" WHERE login = 'North'),   'Novaya 51', 'Saint Petersburg, Novaya 51')
+    (1, (SELECT id FROM "auth"."Accounts" WHERE login = 'Client'),  'Летняя 18', 'Москва, улица Летняя, 18, офис 11'),
+    (2, (SELECT id FROM "auth"."Accounts" WHERE login = 'Client2'), 'Ильменская 4', 'Москва, улица Ильменская, 4'),
+    (3, (SELECT id FROM "auth"."Accounts" WHERE login = 'North'),   'Новая 51', 'Санкт-Петербург, улица Новая, 51')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "crm"."Products" (id, name, description) VALUES
@@ -283,11 +283,11 @@ INSERT INTO "tasks"."Tickets" (
     id, title, description, type_id, status_id, criticality_id, client_id, site_id, product_id,
     created_at, created_by, updated_at, updated_by, responsible_id
 ) VALUES
-    (1, 'CRM-1001', 'Periodic internet outages on Letnyaya 18 site.', 1, 2, 3, 1, 1, 2, TIMESTAMPTZ '2026-02-12T08:10:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Client'), TIMESTAMPTZ '2026-02-24T10:30:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp')),
-    (2, 'CRM-1002', 'Outgoing IP telephony calls fail with 503.', 1, 2, 2, 2, 3, 3, TIMESTAMPTZ '2026-02-18T12:00:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'North'), TIMESTAMPTZ '2026-02-24T09:10:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp')),
-    (3, 'WORK-2001', 'Engineer dispatch to Letnyaya 18 for onsite diagnostics.', 2, 2, 2, 1, 1, 2, TIMESTAMPTZ '2026-02-20T14:05:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), TIMESTAMPTZ '2026-02-24T07:35:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm')),
-    (4, 'CRM-1003', 'Consultation about new internal numbers and call routing.', 1, 3, 1, 1, 2, 3, TIMESTAMPTZ '2026-02-22T11:15:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Client2'), TIMESTAMPTZ '2026-02-24T06:45:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp')),
-    (5, 'WORK-2002', 'Planned replacement of the old router in Saint Petersburg.', 2, 4, 1, 2, 3, 2, TIMESTAMPTZ '2026-02-10T08:00:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), TIMESTAMPTZ '2026-02-23T16:20:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'))
+    (1, 'CRM-1001', 'Периодически пропадает связь по услуге интернет на площадке Летняя 18.', 1, 2, 3, 1, 1, 2, TIMESTAMPTZ '2026-02-12T08:10:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Client'), TIMESTAMPTZ '2026-02-24T10:30:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp')),
+    (2, 'CRM-1002', 'Исходящие вызовы IP-телефонии завершаются ошибкой 503.', 1, 2, 2, 2, 3, 3, TIMESTAMPTZ '2026-02-18T12:00:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'North'), TIMESTAMPTZ '2026-02-24T09:10:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp')),
+    (3, 'WORK-2001', 'Выезд инженера на площадку Летняя 18 для очной диагностики.', 2, 2, 2, 1, 1, 2, TIMESTAMPTZ '2026-02-20T14:05:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), TIMESTAMPTZ '2026-02-24T07:35:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm')),
+    (4, 'CRM-1003', 'Консультация по новым внутренним номерам и маршрутизации звонков.', 1, 3, 1, 1, 2, 3, TIMESTAMPTZ '2026-02-22T11:15:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Client2'), TIMESTAMPTZ '2026-02-24T06:45:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp')),
+    (5, 'WORK-2002', 'Плановая замена старого маршрутизатора на площадке в Санкт-Петербурге.', 2, 4, 1, 2, 3, 2, TIMESTAMPTZ '2026-02-10T08:00:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), TIMESTAMPTZ '2026-02-23T16:20:00Z', (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'))
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "tasks"."ConnectedTickets" (first_task_id, second_task_id, relation_type) VALUES
@@ -296,10 +296,10 @@ INSERT INTO "tasks"."ConnectedTickets" (first_task_id, second_task_id, relation_
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "tasks"."Comments" (id, ticket_id, is_closed_comment, created_by, created_at, updated_at, contents) VALUES
-    (1, 1, FALSE, (SELECT id FROM "auth"."Accounts" WHERE login = 'Client'), TIMESTAMPTZ '2026-02-23T09:12:00Z', TIMESTAMPTZ '2026-02-23T09:12:00Z', 'Confirmed the problem, outages happened three times yesterday.'),
-    (2, 1, FALSE, (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), TIMESTAMPTZ '2026-02-24T10:30:00Z', TIMESTAMPTZ '2026-02-24T10:30:00Z', 'Collected logs from the router and prepared the report template.'),
-    (3, 3, FALSE, (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), TIMESTAMPTZ '2026-02-24T07:35:00Z', TIMESTAMPTZ '2026-02-24T07:35:00Z', 'Engineer will be onsite from 11:00, waiting for access to the server room.'),
-    (4, 5, TRUE,  (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), TIMESTAMPTZ '2026-02-23T16:20:00Z', TIMESTAMPTZ '2026-02-23T16:20:00Z', 'Replacement completed, issue resolved.')
+    (1, 1, FALSE, (SELECT id FROM "auth"."Accounts" WHERE login = 'Client'), TIMESTAMPTZ '2026-02-23T09:12:00Z', TIMESTAMPTZ '2026-02-23T09:12:00Z', 'Подтверждаю проблему, вчера связь пропадала три раза.'),
+    (2, 1, FALSE, (SELECT id FROM "auth"."Accounts" WHERE login = 'Ktp'), TIMESTAMPTZ '2026-02-24T10:30:00Z', TIMESTAMPTZ '2026-02-24T10:30:00Z', 'Собрал логи с маршрутизатора и подготовил шаблон отчёта.'),
+    (3, 3, FALSE, (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), TIMESTAMPTZ '2026-02-24T07:35:00Z', TIMESTAMPTZ '2026-02-24T07:35:00Z', 'Инженер будет на площадке с 11:00, ожидаем доступ в серверную.'),
+    (4, 5, TRUE,  (SELECT id FROM "auth"."Accounts" WHERE login = 'Wfm'), TIMESTAMPTZ '2026-02-23T16:20:00Z', TIMESTAMPTZ '2026-02-23T16:20:00Z', 'Замена выполнена, проблема устранена.')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "tasks"."CommentsReactions" (comment_id, reaction_id) VALUES
