@@ -1,5 +1,7 @@
 .env
 .env.local
 *.log
+.deploy_id_rsa
 evko-deploy-*.tgz
+evko-prod-deploy-*.tgz
 evko-release.tar.gz
