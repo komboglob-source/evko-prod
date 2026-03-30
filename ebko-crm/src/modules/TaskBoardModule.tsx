@@ -24,10 +24,12 @@ interface TaskBoardModuleProps {
   clients: ClientCompany[]
   sites: Site[]
   products: ProductCatalogItem[]
-  onOpenAppeal: (appealId: string) => void
+  onOpenAppeal: (appealId: string, archived: boolean) => void
 }
 
 const DASHBOARD_STORAGE_PREFIX = 'ebko-crm-task-dashboards-v2'
+const VERIFIED_RETENTION_DAYS = 7
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
 
 const defaultFilters: TaskDashboardFilters = {
   status: 'all',
@@ -117,6 +119,35 @@ function moveById<T extends { id: string }>(items: T[], sourceId: string, target
   return next
 }
 
+function isRecentlyVerified(appeal: Appeal): boolean {
+  if (appeal.statusId !== 'Verified') {
+    return false
+  }
+
+  const updatedAt = new Date(appeal.updatedAt).getTime()
+  if (Number.isNaN(updatedAt)) {
+    return false
+  }
+
+  return Date.now() - updatedAt <= VERIFIED_RETENTION_DAYS * MILLISECONDS_PER_DAY
+}
+
+function canShowVerifiedOnBoard(user: UserProfile, appeal: Appeal): boolean {
+  if (!isRecentlyVerified(appeal)) {
+    return false
+  }
+
+  if (user.role === 'admin') {
+    return true
+  }
+
+  if (user.role === 'client') {
+    return false
+  }
+
+  return appeal.responsibleId === user.id
+}
+
 export function TaskBoardModule({
   user,
   appeals,
@@ -143,19 +174,24 @@ export function TaskBoardModule({
 
   const visibleAppeals = useMemo(() => {
     if (user.role === 'admin') {
-      return appeals.filter((appeal) => appeal.statusId !== 'Verified')
+      return appeals.filter(
+        (appeal) => appeal.statusId !== 'Verified' || canShowVerifiedOnBoard(user, appeal),
+      )
     }
 
     if (user.role === 'client') {
       return appeals.filter(
-        (appeal) => appeal.statusId !== 'Verified' && Boolean(user.clientId && appeal.clientId === user.clientId),
+        (appeal) =>
+          Boolean(user.clientId && appeal.clientId === user.clientId) &&
+          (appeal.statusId !== 'Verified' || canShowVerifiedOnBoard(user, appeal)),
       )
     }
 
     return appeals.filter(
       (appeal) =>
-        appeal.statusId !== 'Verified' &&
-        (appeal.responsibleId === user.id || appeal.createdBy === user.id),
+        (appeal.statusId !== 'Verified' &&
+          (appeal.responsibleId === user.id || appeal.createdBy === user.id)) ||
+        canShowVerifiedOnBoard(user, appeal),
     )
   }, [appeals, user])
 
@@ -337,7 +373,7 @@ export function TaskBoardModule({
               }
               options={[
                 { value: 'all', label: 'Все статусы' },
-                ...STATUS_ORDER.filter((status) => status !== 'Verified').map((status) => ({
+                ...STATUS_ORDER.map((status) => ({
                   value: status,
                   label: STATUS_LABELS[status],
                 })),
@@ -478,7 +514,11 @@ export function TaskBoardModule({
               <div className="board-column-content">
                 {columnAppeals.map((appeal) => (
                   <div key={appeal.id} className="board-card">
-                    <button type="button" className="link-button" onClick={() => onOpenAppeal(appeal.id)}>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => onOpenAppeal(appeal.id, appeal.statusId === 'Verified')}
+                    >
                       {appeal.title}
                     </button>
                     <p>{appeal.description.slice(0, 90)}...</p>

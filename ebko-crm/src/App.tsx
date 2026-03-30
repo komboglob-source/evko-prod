@@ -775,11 +775,11 @@ function App() {
             clients={currentData.clients}
             sites={currentData.sites}
             products={currentData.products}
-            onOpenAppeal={(appealId) => {
+            onOpenAppeal={(appealId, archived) => {
               setSelectedAppealId(appealId)
               setSelectedEmployeeId(null)
               setSelectedRepresentativeKey(null)
-              setActiveModule('appeals')
+              setActiveModule(archived ? 'appeals_archive' : 'appeals')
             }}
           />
         )
