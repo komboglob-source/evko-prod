@@ -27,6 +27,8 @@ var allowedImageContentTypes = map[string]struct{}{
 	"image/bmp":  {},
 }
 
+const maxImageBytes = 512 * 1024
+
 func StartsWith(s, prefix string) bool {
 	return (len(s) >= len(prefix)) && (s[:len(prefix)] == prefix)
 }
@@ -238,6 +240,9 @@ func DecodeImageBase64(value *string) ([]byte, error) {
 	decoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
 		return nil, errors.New("invalid base64 image data")
+	}
+	if len(decoded) > maxImageBytes {
+		return nil, errors.New("image is too large")
 	}
 
 	detectedContentType := normalizeImageContentType(http.DetectContentType(decoded))

@@ -156,6 +156,21 @@ func TestDecodeImageBase64(t *testing.T) {
 			t.Fatal("DecodeImageBase64 should reject non-image content types")
 		}
 	})
+
+	t.Run("rejects oversized image", func(t *testing.T) {
+		t.Parallel()
+
+		oversizedBytes := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, make([]byte, maxImageBytes)...)
+		oversizedPayload := "data:image/png;base64," + base64.StdEncoding.EncodeToString(oversizedBytes)
+
+		_, err := DecodeImageBase64(pointerTo(oversizedPayload))
+		if err == nil {
+			t.Fatal("DecodeImageBase64 should reject oversized image payloads")
+		}
+		if !strings.Contains(err.Error(), "too large") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func pointerTo(value string) *string {
