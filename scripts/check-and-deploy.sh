@@ -31,4 +31,4 @@ if [[ "$current_commit" == "$remote_commit" ]]; then
 fi
 
 echo "[evko] new commit detected: ${current_commit} -> ${remote_commit}"
-"${ROOT_DIR}/scripts/deploy.sh"
+/bin/bash "${ROOT_DIR}/scripts/deploy.sh"
