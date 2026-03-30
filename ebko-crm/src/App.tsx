@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import {
   ApiError,
@@ -196,6 +196,23 @@ function representativeRecordKey(customerId: string, representativeId: string): 
   return `${customerId}:${representativeId}`
 }
 
+function isAuthenticationError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status === 401
+  }
+
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const message = error.message.toLowerCase()
+  return (
+    message.includes('invalid or expired access token') ||
+    message.includes('missing or invalid authorization header') ||
+    message.includes('invalid or expired refresh token')
+  )
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [data, setData] = useState<CrmBootstrapData | null>(null)
@@ -209,8 +226,13 @@ function App() {
   const [isDataLoading, setIsDataLoading] = useState(false)
   const [isSessionRestoring, setIsSessionRestoring] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const sessionRef = useRef<Session | null>(null)
 
   const isSignedIn = Boolean(session && data)
+
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
 
   useEffect(() => {
     let cancelled = false
@@ -240,11 +262,13 @@ function App() {
         }
 
         persistStoredSession(hydrated.session)
+        sessionRef.current = hydrated.session
         setSession(hydrated.session)
         setData(hydrated.data)
       } catch (error) {
         console.error('Session restore failed', error)
         clearStoredTokens()
+        sessionRef.current = null
         if (!cancelled) {
           setSession(null)
           setData(null)
@@ -274,6 +298,7 @@ function App() {
       const hydrated = await hydrateSession(loginResult.tokens, loginResult.user)
 
       persistStoredSession(hydrated.session)
+      sessionRef.current = hydrated.session
       setSession(hydrated.session)
       setData(hydrated.data)
       setActiveModule('appeals')
@@ -307,6 +332,7 @@ function App() {
     }
 
     clearStoredTokens()
+    sessionRef.current = null
     setSession(null)
     setData(null)
     setSelectedAppealId(null)
@@ -338,9 +364,53 @@ function App() {
   const { user, tokens } = session
   const currentData: CrmBootstrapData = data
 
+  async function refreshActiveTokens(): Promise<AuthTokens> {
+    const activeSession = sessionRef.current ?? session
+    const refreshedTokens = await refreshToken({
+      refreshToken: activeSession?.tokens.refreshToken ?? tokens.refreshToken,
+    })
+    const refreshedUser = (await loadCurrentProfile(refreshedTokens)) ?? activeSession?.user ?? user
+    const nextSession = {
+      user: refreshedUser,
+      tokens: refreshedTokens,
+    }
+
+    persistStoredSession(nextSession)
+    sessionRef.current = nextSession
+    setSession(nextSession)
+
+    return refreshedTokens
+  }
+
+  async function withFreshTokens<T>(
+    operation: (activeTokens: AuthTokens) => Promise<T>,
+  ): Promise<T> {
+    const activeTokens = sessionRef.current?.tokens ?? tokens
+
+    try {
+      return await operation(activeTokens)
+    } catch (error) {
+      if (!isAuthenticationError(error)) {
+        throw error
+      }
+
+      try {
+        const refreshedTokens = await refreshActiveTokens()
+        return await operation(refreshedTokens)
+      } catch {
+        clearStoredTokens()
+        sessionRef.current = null
+        setSession(null)
+        setData(null)
+        throw new Error('Сессия истекла. Войдите в систему заново.')
+      }
+    }
+  }
+
   async function refreshData(): Promise<void> {
-    const hydrated = await hydrateSession(tokens, user)
+    const hydrated = await withFreshTokens((activeTokens) => hydrateSession(activeTokens, user))
     persistStoredSession(hydrated.session)
+    sessionRef.current = hydrated.session
     setSession(hydrated.session)
     setData(hydrated.data)
   }
@@ -362,29 +432,35 @@ function App() {
       return
     }
 
-    const nextAppeals = await Promise.all(
-      uniqueIDs.map((appealID) => loadAppealById(tokens, currentData, appealID)),
+    const nextAppeals = await withFreshTokens((activeTokens) =>
+      Promise.all(uniqueIDs.map((appealID) => loadAppealById(activeTokens, currentData, appealID))),
     )
     replaceAppeals(nextAppeals)
   }
 
   async function createAppeal(draft: Omit<Appeal, 'id'>): Promise<void> {
-    const createdAppeal = await syncAppealCreate(tokens, currentData, draft)
+    const createdAppeal = await withFreshTokens((activeTokens) =>
+      syncAppealCreate(activeTokens, currentData, draft),
+    )
     replaceAppeals([createdAppeal])
     setSelectedAppealId(createdAppeal.id)
   }
 
   async function updateAppeal(appealId: string, patch: Partial<Appeal>): Promise<void> {
-    const updatedAppeal = await syncAppealPatch(tokens, currentData, appealId, patch)
+    const updatedAppeal = await withFreshTokens((activeTokens) =>
+      syncAppealPatch(activeTokens, currentData, appealId, patch),
+    )
     replaceAppeals([updatedAppeal])
   }
 
   async function addComment(appealId: string, contents: string, files: FileAttachment[]): Promise<void> {
-    await syncAppealComment(
-      tokens,
-      appealId,
-      contents,
-      files.map((file) => ({ name: file.name, size: file.size })),
+    await withFreshTokens((activeTokens) =>
+      syncAppealComment(
+        activeTokens,
+        appealId,
+        contents,
+        files.map((file) => ({ name: file.name, size: file.size })),
+      ),
     )
     await reloadAppealsByID(appealId)
   }
@@ -394,46 +470,52 @@ function App() {
     linkedAppealId: string,
     relationType: AppealLinkType,
   ): Promise<void> {
-    await syncAppealLink(tokens, appealId, linkedAppealId, relationType)
+    await withFreshTokens((activeTokens) =>
+      syncAppealLink(activeTokens, appealId, linkedAppealId, relationType),
+    )
     await reloadAppealsByID(appealId, linkedAppealId)
   }
 
   async function unlinkAppeal(appealId: string, linkedAppealId: string): Promise<void> {
-    await syncAppealUnlink(tokens, appealId, linkedAppealId)
+    await withFreshTokens((activeTokens) => syncAppealUnlink(activeTokens, appealId, linkedAppealId))
     await reloadAppealsByID(appealId, linkedAppealId)
   }
 
   async function upsertEmployee(employee: Employee): Promise<void> {
-    const savedEmployee = await syncEmployeeUpsert(tokens, employee)
+    const savedEmployee = await withFreshTokens((activeTokens) =>
+      syncEmployeeUpsert(activeTokens, employee),
+    )
     await refreshData()
     setSelectedEmployeeId(savedEmployee.accountId)
   }
 
   async function deleteEmployee(employeeId: string): Promise<void> {
-    await syncEmployeeDelete(tokens, employeeId)
+    await withFreshTokens((activeTokens) => syncEmployeeDelete(activeTokens, employeeId))
     await refreshData()
   }
 
   async function upsertCustomer(customer: ClientCompany): Promise<void> {
-    const savedCustomer = await syncClientUpsert(tokens, customer)
+    const savedCustomer = await withFreshTokens((activeTokens) =>
+      syncClientUpsert(activeTokens, customer),
+    )
     await refreshData()
     setSelectedCustomerId(savedCustomer.id)
   }
 
   async function deleteCustomer(customerId: string): Promise<void> {
-    await syncClientDelete(tokens, customerId)
+    await withFreshTokens((activeTokens) => syncClientDelete(activeTokens, customerId))
     await refreshData()
   }
 
   async function upsertSite(site: Site): Promise<void> {
-    const savedSite = await syncSiteUpsert(tokens, site)
+    const savedSite = await withFreshTokens((activeTokens) => syncSiteUpsert(activeTokens, site))
     await refreshData()
     setSelectedCustomerId(savedSite.clientId)
     setSelectedSiteId(savedSite.id)
   }
 
   async function deleteSite(siteId: string): Promise<void> {
-    await syncSiteDelete(tokens, siteId)
+    await withFreshTokens((activeTokens) => syncSiteDelete(activeTokens, siteId))
     await refreshData()
   }
 
@@ -441,30 +523,34 @@ function App() {
     customerId: string,
     representative: ClientRepresentative,
   ): Promise<void> {
-    const savedRepresentative = await syncRepresentativeUpsert(tokens, customerId, representative)
+    const savedRepresentative = await withFreshTokens((activeTokens) =>
+      syncRepresentativeUpsert(activeTokens, customerId, representative),
+    )
     await refreshData()
     setSelectedRepresentativeKey(representativeRecordKey(savedRepresentative.clientId, savedRepresentative.accountId))
   }
 
   async function deleteRepresentative(customerId: string, representativeId: string): Promise<void> {
     void customerId
-    await syncRepresentativeDelete(tokens, representativeId)
+    await withFreshTokens((activeTokens) => syncRepresentativeDelete(activeTokens, representativeId))
     await refreshData()
   }
 
   async function upsertEquipment(equipmentUnit: EquipmentUnit): Promise<void> {
-    const savedEquipment = await syncEquipmentUpsert(tokens, equipmentUnit)
+    const savedEquipment = await withFreshTokens((activeTokens) =>
+      syncEquipmentUpsert(activeTokens, equipmentUnit),
+    )
     await refreshData()
     setSelectedSiteId(savedEquipment.siteId ?? selectedSiteId)
   }
 
   async function deleteEquipment(equipmentId: string): Promise<void> {
-    await syncEquipmentDelete(tokens, equipmentId)
+    await withFreshTokens((activeTokens) => syncEquipmentDelete(activeTokens, equipmentId))
     await refreshData()
   }
 
   async function attachEquipmentToSite(equipmentId: string, siteId: string): Promise<void> {
-    await syncEquipmentSite(tokens, equipmentId, siteId)
+    await withFreshTokens((activeTokens) => syncEquipmentSite(activeTokens, equipmentId, siteId))
     await refreshData()
   }
 
@@ -472,12 +558,19 @@ function App() {
     setIsDataLoading(true)
 
     try {
-      const updatedUser = await syncCurrentProfile(tokens, patch)
-      const bootstrap = await loadCrmBootstrap(tokens)
+      const updatedUser = await withFreshTokens((activeTokens) =>
+        syncCurrentProfile(activeTokens, patch),
+      )
+      const bootstrap = await withFreshTokens((activeTokens) => loadCrmBootstrap(activeTokens))
       const hydratedBootstrap = withCurrentUser(bootstrap, updatedUser)
 
-      persistStoredSession({ user: updatedUser, tokens })
-      setSession((previous) => (previous ? { ...previous, user: updatedUser } : previous))
+      const nextSession = {
+        user: updatedUser,
+        tokens: sessionRef.current?.tokens ?? tokens,
+      }
+      persistStoredSession(nextSession)
+      sessionRef.current = nextSession
+      setSession(nextSession)
       setData(hydratedBootstrap)
     } finally {
       setIsDataLoading(false)
@@ -508,7 +601,7 @@ function App() {
   function handleSidebarModuleChange(module: ModuleKey): void {
     setActiveModule(module)
 
-    if (module !== 'appeals') {
+    if (module !== 'appeals' && module !== 'appeals_archive') {
       setSelectedAppealId(null)
     }
 
@@ -535,6 +628,7 @@ function App() {
       case 'appeals':
         return (
           <AppealsModule
+            key="appeals"
             user={user}
             appeals={currentData.appeals}
             employees={currentData.employees}
@@ -543,6 +637,51 @@ function App() {
             products={currentData.products}
             selectedAppealId={selectedAppealId}
             onSelectAppeal={setSelectedAppealId}
+            onOpenAppeal={(appealId, archived) => {
+              setSelectedAppealId(appealId)
+              setActiveModule(archived ? 'appeals_archive' : 'appeals')
+            }}
+            onCreateAppeal={createAppeal}
+            onUpdateAppeal={updateAppeal}
+            onAddComment={addComment}
+            onLinkAppeal={linkAppeal}
+            onUnlinkAppeal={unlinkAppeal}
+            onOpenPerson={openPerson}
+            onOpenSite={(siteId) => {
+              setSelectedSiteId(siteId)
+              const site = currentData.sites.find((item) => item.id === siteId)
+              setSelectedCustomerId(site?.clientId ?? null)
+              setSelectedEmployeeId(null)
+              setSelectedRepresentativeKey(null)
+              setActiveModule('customers')
+            }}
+            onOpenCustomer={(customerId) => {
+              setSelectedCustomerId(customerId)
+              setSelectedSiteId(null)
+              setSelectedEmployeeId(null)
+              setSelectedRepresentativeKey(null)
+              setActiveModule('customers')
+            }}
+          />
+        )
+
+      case 'appeals_archive':
+        return (
+          <AppealsModule
+            key="appeals_archive"
+            user={user}
+            appeals={currentData.appeals}
+            employees={currentData.employees}
+            clients={currentData.clients}
+            sites={currentData.sites}
+            products={currentData.products}
+            archiveMode
+            selectedAppealId={selectedAppealId}
+            onSelectAppeal={setSelectedAppealId}
+            onOpenAppeal={(appealId, archived) => {
+              setSelectedAppealId(appealId)
+              setActiveModule(archived ? 'appeals_archive' : 'appeals')
+            }}
             onCreateAppeal={createAppeal}
             onUpdateAppeal={updateAppeal}
             onAddComment={addComment}

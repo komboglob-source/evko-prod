@@ -143,14 +143,20 @@ export function TaskBoardModule({
 
   const visibleAppeals = useMemo(() => {
     if (user.role === 'admin') {
-      return appeals
+      return appeals.filter((appeal) => appeal.statusId !== 'Verified')
     }
 
     if (user.role === 'client') {
-      return appeals.filter((appeal) => Boolean(user.clientId && appeal.clientId === user.clientId))
+      return appeals.filter(
+        (appeal) => appeal.statusId !== 'Verified' && Boolean(user.clientId && appeal.clientId === user.clientId),
+      )
     }
 
-    return appeals.filter((appeal) => appeal.responsibleId === user.id || appeal.createdBy === user.id)
+    return appeals.filter(
+      (appeal) =>
+        appeal.statusId !== 'Verified' &&
+        (appeal.responsibleId === user.id || appeal.createdBy === user.id),
+    )
   }, [appeals, user])
 
   const selectedDashboard =
@@ -331,7 +337,7 @@ export function TaskBoardModule({
               }
               options={[
                 { value: 'all', label: 'Все статусы' },
-                ...STATUS_ORDER.map((status) => ({
+                ...STATUS_ORDER.filter((status) => status !== 'Verified').map((status) => ({
                   value: status,
                   label: STATUS_LABELS[status],
                 })),

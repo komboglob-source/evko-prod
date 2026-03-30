@@ -252,154 +252,183 @@ export function EquipmentModule({
       ) : null}
 
       {equipmentDraft ? (
-        <form className="inline-form" onSubmit={saveEquipment}>
-          <h3>{selectedEquipment ? 'Редактирование оборудования' : 'Новая единица оборудования'}</h3>
-
-          <div className="form-grid">
-            <label>
-              Тип оборудования
-              <CustomSelect
-                value={equipmentDraft.typeId}
-                onChange={(event) =>
-                  setEquipmentDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          typeId: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                options={equipmentTypes.map((type) => ({
-                  value: type.id,
-                  label: type.name,
-                }))}
-                placeholder={null}
-                showPlaceholder={false}
-                required
-              />
-            </label>
-
-            <label>
-              Серийный номер
-              <input
-                className="text-input"
-                value={equipmentDraft.serialNumber}
-                onChange={(event) =>
-                  setEquipmentDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          serialNumber: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Название
-              <input
-                className="text-input"
-                value={equipmentDraft.name}
-                onChange={(event) =>
-                  setEquipmentDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          name: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Вес (кг)
-              <input
-                className="text-input"
-                type="number"
-                min={0}
-                step={0.01}
-                value={equipmentDraft.weight}
-                onChange={(event) =>
-                  setEquipmentDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          weight: Number(event.target.value),
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Площадка
-              <CustomSelect
-                value={equipmentDraft.siteId ?? ''}
-                onChange={(event) =>
-                  setEquipmentDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          siteId: event.target.value || undefined,
-                        }
-                      : previous,
-                  )
-                }
-                options={[
-                  { value: '', label: 'Не указана' },
-                  ...sites.map((site) => ({
-                    value: site.id,
-                    label: `${site.name} (${site.address})`,
-                  })),
-                ]}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
-          </div>
-
-          <label>
-            Описание
-            <textarea
-              className="text-input text-area"
-              rows={4}
-              value={equipmentDraft.description}
-              onChange={(event) =>
-                setEquipmentDraft((previous) =>
-                  previous
-                    ? {
-                        ...previous,
-                        description: event.target.value,
-                      }
-                    : previous,
-                )
-              }
-            />
-          </label>
-
-          <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm" disabled={isSaving}>
-              {isSaving ? 'Сохранение...' : 'Сохранить'}
-            </button>
+        <div
+          className="modal-overlay"
+          onClick={(event) => event.target === event.currentTarget && setEquipmentDraft(null)}
+        >
+          <div className="modal-card">
             <button
+              className="modal-close"
               type="button"
-              className="ghost-button button-sm"
               onClick={() => setEquipmentDraft(null)}
-              disabled={isSaving}
+              aria-label="Закрыть"
             >
-              Отмена
+              x
             </button>
+
+            <form className="inline-form modal-form" onSubmit={saveEquipment}>
+              <h3 className="modal-title">
+                {selectedEquipment ? 'Редактирование оборудования' : 'Новая единица оборудования'}
+              </h3>
+
+              <div className="form-grid">
+                <label>
+                  <span className="field-label">
+                    Тип оборудования <span className="required">*</span>
+                  </span>
+                  <CustomSelect
+                    value={equipmentDraft.typeId}
+                    onChange={(event) =>
+                      setEquipmentDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              typeId: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    options={equipmentTypes.map((type) => ({
+                      value: type.id,
+                      label: type.name,
+                    }))}
+                    placeholder={null}
+                    showPlaceholder={false}
+                    required
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">
+                    Серийный номер <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    value={equipmentDraft.serialNumber}
+                    onChange={(event) =>
+                      setEquipmentDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              serialNumber: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                    placeholder="SN-00000001"
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">
+                    Название <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    value={equipmentDraft.name}
+                    onChange={(event) =>
+                      setEquipmentDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              name: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                    placeholder="Например, Маршрутизатор Cisco"
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">
+                    Вес (кг) <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={equipmentDraft.weight}
+                    onChange={(event) =>
+                      setEquipmentDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              weight: Number(event.target.value),
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                  />
+                </label>
+
+                <label className="full-width">
+                  <span className="field-label">Площадка</span>
+                  <CustomSelect
+                    value={equipmentDraft.siteId ?? ''}
+                    onChange={(event) =>
+                      setEquipmentDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              siteId: event.target.value || undefined,
+                            }
+                          : previous,
+                      )
+                    }
+                    options={[
+                      { value: '', label: 'Не указана' },
+                      ...sites.map((site) => ({
+                        value: site.id,
+                        label: `${site.name} (${site.address})`,
+                      })),
+                    ]}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+              </div>
+
+              <label className="full-width">
+                <span className="field-label">Описание</span>
+                <textarea
+                  className="text-input text-area"
+                  rows={4}
+                  value={equipmentDraft.description}
+                  onChange={(event) =>
+                    setEquipmentDraft((previous) =>
+                      previous
+                        ? {
+                            ...previous,
+                            description: event.target.value,
+                          }
+                        : previous,
+                    )
+                  }
+                  placeholder="Короткое описание или примечание по оборудованию"
+                />
+              </label>
+
+              <div className="section-head-row modal-actions">
+                <button
+                  type="button"
+                  className="ghost-button button-sm"
+                  onClick={() => setEquipmentDraft(null)}
+                  disabled={isSaving}
+                >
+                  Отмена
+                </button>
+                <button type="submit" className="primary-button button-sm" disabled={isSaving}>
+                  {isSaving ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+        </div>
       ) : null}
 
       {selectedEquipment ? (

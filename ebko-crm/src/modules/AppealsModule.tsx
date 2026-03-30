@@ -36,8 +36,10 @@ interface AppealsModuleProps {
   clients: ClientCompany[]
   sites: Site[]
   products: ProductCatalogItem[]
+  archiveMode?: boolean
   selectedAppealId: string | null
   onSelectAppeal: (appealId: string | null) => void
+  onOpenAppeal?: (appealId: string, archived: boolean) => void
   onCreateAppeal: (draft: Omit<Appeal, 'id'>) => Promise<void>
   onUpdateAppeal: (appealId: string, patch: Partial<Appeal>) => Promise<void>
   onAddComment: (appealId: string, text: string, files: FileAttachment[]) => Promise<void>
@@ -201,8 +203,10 @@ export function AppealsModule({
   clients,
   sites,
   products,
+  archiveMode = false,
   selectedAppealId,
   onSelectAppeal,
+  onOpenAppeal,
   onCreateAppeal,
   onUpdateAppeal,
   onAddComment,
@@ -235,7 +239,11 @@ export function AppealsModule({
 
   const viewableAppeals = appeals.filter((appeal) => canViewAppeal(user, appeal))
 
-  const visibleAppeals = viewableAppeals.filter((appeal) => {
+  const scopedAppeals = viewableAppeals.filter((appeal) =>
+    archiveMode ? appeal.statusId === 'Verified' : appeal.statusId !== 'Verified',
+  )
+
+  const visibleAppeals = scopedAppeals.filter((appeal) => {
       const normalizedQuery = appealQuery.trim().toLowerCase()
       const matchesQuery =
         !normalizedQuery ||
@@ -275,7 +283,7 @@ export function AppealsModule({
     })
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
 
-  const selectedAppeal = viewableAppeals.find((appeal) => appeal.id === selectedAppealId) ?? null
+  const selectedAppeal = scopedAppeals.find((appeal) => appeal.id === selectedAppealId) ?? null
   const selectedAppealLinks = selectedAppeal ? getAppealLinks(selectedAppeal) : []
   const selectedClientSites = sites.filter((site) => site.clientId === createState.clientId)
   const selectedCreateProducts = getAvailableProducts(products, sites, createState.siteId)
@@ -293,6 +301,16 @@ export function AppealsModule({
   function selectAppeal(appealId: string | null): void {
     setEditState(null)
     onSelectAppeal(appealId)
+  }
+
+  function openAppeal(appeal: Appeal): void {
+    const isArchivedAppeal = appeal.statusId === 'Verified'
+    if (isArchivedAppeal === archiveMode || !onOpenAppeal) {
+      selectAppeal(appeal.id)
+      return
+    }
+
+    onOpenAppeal(appeal.id, isArchivedAppeal)
   }
 
   function resolveEmployeeName(employeeId?: string): string {
@@ -394,6 +412,8 @@ export function AppealsModule({
       return
     }
 
+    const nextStatus = editState.statusId
+
     await onUpdateAppeal(selectedAppeal.id, {
       description: editState.description,
       statusId: editState.statusId,
@@ -405,6 +425,11 @@ export function AppealsModule({
       updatedAt: new Date().toISOString(),
       updatedBy: user.id,
     })
+
+    if (!archiveMode && nextStatus === 'Verified') {
+      selectAppeal(null)
+      return
+    }
 
     setEditState(null)
   }
@@ -490,7 +515,7 @@ export function AppealsModule({
       <section className="module-wrap">
         <div className="module-title-row">
           <button type="button" className="ghost-button button-sm" onClick={() => selectAppeal(null)}>
-            К списку
+            {archiveMode ? 'К архиву' : 'К списку'}
           </button>
           <h1>{selectedAppeal.title}</h1>
         </div>
@@ -566,7 +591,7 @@ export function AppealsModule({
                         <button
                           type="button"
                           className="ghost-button button-sm"
-                          onClick={() => selectAppeal(appeal.id)}
+                          onClick={() => openAppeal(appeal)}
                         >
                           Открыть
                         </button>
@@ -969,150 +994,189 @@ export function AppealsModule({
   return (
     <section className="module-wrap">
       <div className="module-title-row">
-        <h1>Обращения</h1>
-        <button
-          type="button"
-          className="primary-button button-sm"
-          onClick={() => {
-            setCreateState(defaultCreateState(user, clients, sites, products))
-            setIsCreateOpen((value) => !value)
-          }}
-        >
-          {isCreateOpen ? 'Скрыть форму' : 'Создать обращение'}
-        </button>
+        <h1>{archiveMode ? 'Архив задач' : 'Обращения'}</h1>
+        {!archiveMode ? (
+          <button
+            type="button"
+            className="primary-button button-sm"
+            onClick={() => {
+              setCreateState(defaultCreateState(user, clients, sites, products))
+              setIsCreateOpen(true)
+            }}
+          >
+            Создать обращение
+          </button>
+        ) : null}
       </div>
 
-      {isCreateOpen ? (
-        <form className="inline-form" onSubmit={handleCreate}>
-          <div className="form-grid">
-            <label>
-              Тип
-              <CustomSelect
-                value={createState.typeId}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    typeId: event.target.value as Appeal['typeId'],
-                  }))
-                }
-                options={[
-                  { value: 'KTP', label: 'КТП', disabled: !canCreateAppealType(user, 'KTP') },
-                  { value: 'WFM', label: 'WFM', disabled: !canCreateAppealType(user, 'WFM') },
-                ]}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
+      {!archiveMode && isCreateOpen ? (
+        <div
+          className="modal-overlay"
+          onClick={(event) => event.target === event.currentTarget && setIsCreateOpen(false)}
+        >
+          <div className="modal-card">
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setIsCreateOpen(false)}
+              aria-label="Закрыть"
+            >
+              x
+            </button>
 
-            <label>
-              Критичность
-              <CustomSelect
-                value={createState.criticalityId}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    criticalityId: event.target.value as AppealCriticality,
-                  }))
-                }
-                options={criticalityOptions}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
+            <form className="inline-form modal-form" onSubmit={handleCreate}>
+              <h3 className="modal-title">Новое обращение</h3>
 
-            {user.role !== 'client' ? (
-              <label>
-                Клиент
-                <CustomSelect
-                  value={createState.clientId}
+              <div className="form-grid">
+                <label>
+                  <span className="field-label">
+                    Тип <span className="required">*</span>
+                  </span>
+                  <CustomSelect
+                    value={createState.typeId}
+                    onChange={(event) =>
+                      setCreateState((previous) => ({
+                        ...previous,
+                        typeId: event.target.value as Appeal['typeId'],
+                      }))
+                    }
+                    options={[
+                      { value: 'KTP', label: 'КТП', disabled: !canCreateAppealType(user, 'KTP') },
+                      { value: 'WFM', label: 'WFM', disabled: !canCreateAppealType(user, 'WFM') },
+                    ]}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">
+                    Критичность <span className="required">*</span>
+                  </span>
+                  <CustomSelect
+                    value={createState.criticalityId}
+                    onChange={(event) =>
+                      setCreateState((previous) => ({
+                        ...previous,
+                        criticalityId: event.target.value as AppealCriticality,
+                      }))
+                    }
+                    options={criticalityOptions}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+
+                {user.role !== 'client' ? (
+                  <label>
+                    <span className="field-label">
+                      Клиент <span className="required">*</span>
+                    </span>
+                    <CustomSelect
+                      value={createState.clientId}
+                      onChange={(event) =>
+                        setCreateState((previous) => ({
+                          ...previous,
+                          clientId: event.target.value,
+                          siteId: '',
+                          productId: '',
+                        }))
+                      }
+                      options={clients.map((client) => ({
+                        value: client.id,
+                        label: client.name,
+                      }))}
+                      placeholder={null}
+                      showPlaceholder={false}
+                    />
+                  </label>
+                ) : null}
+
+                <label>
+                  <span className="field-label">Площадка</span>
+                  <CustomSelect
+                    value={createState.siteId}
+                    onChange={(event) =>
+                      setCreateState((previous) => {
+                        const nextSiteId = event.target.value
+                        const nextSite = selectedClientSites.find((site) => site.id === nextSiteId)
+                        return {
+                          ...previous,
+                          siteId: nextSiteId,
+                          productId: nextSite?.productIds[0] ?? '',
+                        }
+                      })
+                    }
+                    options={[
+                      { value: '', label: 'Не выбрана' },
+                      ...selectedClientSites.map((site) => ({
+                        value: site.id,
+                        label: `${site.name} (${site.address})`,
+                      })),
+                    ]}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">Продукт</span>
+                  <CustomSelect
+                    value={createState.productId}
+                    onChange={(event) =>
+                      setCreateState((previous) => ({
+                        ...previous,
+                        productId: event.target.value,
+                      }))
+                    }
+                    options={[
+                      { value: '', label: 'Не выбран' },
+                      ...selectedCreateProducts.map((product) => ({
+                        value: product.id,
+                        label: product.name,
+                      })),
+                    ]}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+              </div>
+
+              <label className="full-width">
+                <span className="field-label">
+                  Описание <span className="required">*</span>
+                </span>
+                <textarea
+                  className="text-input text-area"
+                  rows={5}
+                  value={createState.description}
                   onChange={(event) =>
                     setCreateState((previous) => ({
                       ...previous,
-                      clientId: event.target.value,
-                      siteId: '',
-                      productId: '',
+                      description: event.target.value,
                     }))
                   }
-                  options={clients.map((client) => ({
-                    value: client.id,
-                    label: client.name,
-                  }))}
-                  placeholder={null}
-                  showPlaceholder={false}
+                  required
+                  placeholder="Опишите проблему, контекст и ожидаемый результат"
                 />
               </label>
-            ) : null}
 
-            <label>
-              Площадка
-              <CustomSelect
-                value={createState.siteId}
-                onChange={(event) =>
-                  setCreateState((previous) => {
-                    const nextSiteId = event.target.value
-                    const nextSite = selectedClientSites.find((site) => site.id === nextSiteId)
-                    return {
-                      ...previous,
-                      siteId: nextSiteId,
-                      productId: nextSite?.productIds[0] ?? '',
-                    }
-                  })
-                }
-                options={[
-                  { value: '', label: 'Не выбрана' },
-                  ...selectedClientSites.map((site) => ({
-                    value: site.id,
-                    label: `${site.name} (${site.address})`,
-                  })),
-                ]}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
-
-            <label>
-              Продукт
-              <CustomSelect
-                value={createState.productId}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    productId: event.target.value,
-                  }))
-                }
-                options={[
-                  { value: '', label: 'Не выбран' },
-                  ...selectedCreateProducts.map((product) => ({
-                    value: product.id,
-                    label: product.name,
-                  })),
-                ]}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
+              <div className="section-head-row modal-actions">
+                <button
+                  type="button"
+                  className="ghost-button button-sm"
+                  onClick={() => setIsCreateOpen(false)}
+                  disabled={isCreating}
+                >
+                  Отмена
+                </button>
+                <button className="primary-button button-sm" type="submit" disabled={isCreating}>
+                  {isCreating ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
           </div>
-
-          <label>
-            Описание
-            <textarea
-              className="text-input text-area"
-              rows={4}
-              value={createState.description}
-              onChange={(event) =>
-                setCreateState((previous) => ({
-                  ...previous,
-                  description: event.target.value,
-                }))
-              }
-              required
-            />
-          </label>
-
-          <button className="primary-button button-sm" type="submit" disabled={isCreating}>
-            {isCreating ? 'Сохранение...' : 'Сохранить'}
-          </button>
-        </form>
+        </div>
       ) : null}
 
       <div className="form-grid">
@@ -1141,22 +1205,24 @@ export function AppealsModule({
           />
         </label>
 
-        <label>
-          Статус
-          <CustomSelect
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as AppealStatus | '')}
-            options={[
-              { value: '', label: 'Все статусы' },
-              ...STATUS_ORDER.map((status) => ({
-                value: status,
-                label: STATUS_LABELS[status],
-              })),
-            ]}
-            placeholder={null}
-            showPlaceholder={false}
-          />
-        </label>
+        {!archiveMode ? (
+          <label>
+            Статус
+            <CustomSelect
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as AppealStatus | '')}
+              options={[
+                { value: '', label: 'Все статусы' },
+                ...STATUS_ORDER.filter((status) => status !== 'Verified').map((status) => ({
+                  value: status,
+                  label: STATUS_LABELS[status],
+                })),
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+        ) : null}
 
         <label>
           Критичность
@@ -1281,7 +1347,11 @@ export function AppealsModule({
       </div>
 
       {visibleAppeals.length === 0 ? (
-        <p className="empty-state">По текущим фильтрам обращения не найдены.</p>
+        <p className="empty-state">
+          {archiveMode
+            ? 'По текущим фильтрам архивные задачи не найдены.'
+            : 'По текущим фильтрам обращения не найдены.'}
+        </p>
       ) : (
         <div className="cards-column">
           {visibleAppeals.map((appeal) => (
@@ -1289,7 +1359,7 @@ export function AppealsModule({
               type="button"
               key={appeal.id}
               className="appeal-card"
-              onClick={() => selectAppeal(appeal.id)}
+              onClick={() => openAppeal(appeal)}
             >
               <div className="card-row">
                 <strong className="appeal-card-title">{appeal.title}</strong>

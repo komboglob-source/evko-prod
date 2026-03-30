@@ -2,6 +2,7 @@ export type UserRole = 'admin' | 'ktp' | 'wfm' | 'client' | 'ebko'
 
 export type ModuleKey =
   | 'appeals'
+  | 'appeals_archive'
   | 'employees'
   | 'customers'
   | 'clients'

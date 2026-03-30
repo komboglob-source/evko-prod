@@ -312,229 +312,288 @@ export function CustomersModule({
       ) : null}
 
       {customerDraft ? (
-        <form className="inline-form" onSubmit={saveCustomer}>
-          <h3>{selectedCustomer ? 'Редактирование заказчика' : 'Новый заказчик'}</h3>
-
-          <div className="form-grid">
-            <label>
-              Название компании
-              <input
-                className="text-input"
-                value={customerDraft.name}
-                onChange={(event) =>
-                  setCustomerDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          name: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Адрес
-              <input
-                className="text-input"
-                value={customerDraft.address}
-                onChange={(event) =>
-                  setCustomerDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          address: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              CEO (представитель)
-              <CustomSelect
-                value={customerDraft.ceoId ?? ''}
-                onChange={(event) =>
-                  setCustomerDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          ceoId: event.target.value || undefined,
-                        }
-                      : previous,
-                  )
-                }
-                options={[
-                  { value: '', label: 'Не задан' },
-                  ...customerDraft.representatives.map((representative) => ({
-                    value: representative.accountId,
-                    label: representative.fullName,
-                  })),
-                ]}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
-          </div>
-
-          <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm" disabled={isCustomerSaving}>
-              {isCustomerSaving ? 'Сохранение...' : 'Сохранить'}
-            </button>
+        <div
+          className="modal-overlay"
+          onClick={(event) => event.target === event.currentTarget && setCustomerDraft(null)}
+        >
+          <div className="modal-card">
             <button
+              className="modal-close"
               type="button"
-              className="ghost-button button-sm"
               onClick={() => setCustomerDraft(null)}
-              disabled={isCustomerSaving}
+              aria-label="Закрыть"
             >
-              Отмена
+              x
             </button>
+
+            <form className="inline-form modal-form" onSubmit={saveCustomer}>
+              <h3 className="modal-title">
+                {selectedCustomer ? 'Редактирование заказчика' : 'Новый заказчик'}
+              </h3>
+
+              <div className="form-grid">
+                <label>
+                  <span className="field-label">
+                    Название компании <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    value={customerDraft.name}
+                    onChange={(event) =>
+                      setCustomerDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              name: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                    placeholder="Например, ООО Ромашка"
+                  />
+                </label>
+
+                <label className="full-width">
+                  <span className="field-label">
+                    Адрес <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    value={customerDraft.address}
+                    onChange={(event) =>
+                      setCustomerDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              address: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                    placeholder="Город, улица, дом"
+                  />
+                </label>
+
+                <label className="full-width">
+                  <span className="field-label">CEO (представитель)</span>
+                  <CustomSelect
+                    value={customerDraft.ceoId ?? ''}
+                    onChange={(event) =>
+                      setCustomerDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              ceoId: event.target.value || undefined,
+                            }
+                          : previous,
+                      )
+                    }
+                    options={[
+                      { value: '', label: 'Не задан' },
+                      ...customerDraft.representatives.map((representative) => ({
+                        value: representative.accountId,
+                        label: representative.fullName,
+                      })),
+                    ]}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+              </div>
+
+              <div className="section-head-row modal-actions">
+                <button
+                  type="button"
+                  className="ghost-button button-sm"
+                  onClick={() => setCustomerDraft(null)}
+                  disabled={isCustomerSaving}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button button-sm"
+                  disabled={isCustomerSaving}
+                >
+                  {isCustomerSaving ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+        </div>
       ) : null}
 
       {siteDraft ? (
-        <form className="inline-form" onSubmit={saveSite}>
-          <h3>{selectedSite ? 'Редактирование площадки' : 'Новая площадка'}</h3>
-
-          <div className="form-grid">
-            <label>
-              Заказчик
-              <CustomSelect
-                value={siteDraft.clientId}
-                onChange={(event) => {
-                  const nextClientId = event.target.value
-                  const targetCustomer = customers.find((customer) => customer.id === nextClientId)
-                  setSiteDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          clientId: nextClientId,
-                          responsibleId: targetCustomer?.representatives[0]?.accountId ?? '',
-                        }
-                      : previous,
-                  )
-                }}
-                options={visibleCustomers.map((customer) => ({
-                  value: customer.id,
-                  label: customer.name,
-                }))}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
-
-            <label>
-              Название площадки
-              <input
-                className="text-input"
-                value={siteDraft.name}
-                onChange={(event) =>
-                  setSiteDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          name: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Адрес площадки
-              <input
-                className="text-input"
-                value={siteDraft.address}
-                onChange={(event) =>
-                  setSiteDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          address: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Ответственный представитель
-              <CustomSelect
-                value={siteDraft.responsibleId}
-                onChange={(event) =>
-                  setSiteDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          responsibleId: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                options={
-                  customers
-                    .find((customer) => customer.id === siteDraft.clientId)
-                    ?.representatives.map((representative) => ({
-                      value: representative.accountId,
-                      label: representative.fullName,
-                    })) ?? []
-                }
-                placeholder={null}
-                showPlaceholder={false}
-                required
-              />
-            </label>
-
-            <label>
-              Продукты
-              <CustomMultiSelect
-                value={siteDraft.productIds}
-                onChange={(event) => {
-                  const selectedProducts = Array.from(event.target.selectedOptions).map(
-                    (option) => option.value,
-                  )
-
-                  setSiteDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          productIds: selectedProducts,
-                        }
-                      : previous,
-                  )
-                }}
-                options={products.map((product) => ({
-                  value: product.id,
-                  label: product.name,
-                }))}
-                size={Math.max(3, Math.min(6, products.length))}
-              />
-            </label>
-          </div>
-
-          <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm" disabled={isSiteSaving}>
-              {isSiteSaving ? 'Сохранение...' : 'Сохранить'}
-            </button>
+        <div
+          className="modal-overlay"
+          onClick={(event) => event.target === event.currentTarget && setSiteDraft(null)}
+        >
+          <div className="modal-card">
             <button
+              className="modal-close"
               type="button"
-              className="ghost-button button-sm"
               onClick={() => setSiteDraft(null)}
-              disabled={isSiteSaving}
+              aria-label="Закрыть"
             >
-              Отмена
+              x
             </button>
+
+            <form className="inline-form modal-form" onSubmit={saveSite}>
+              <h3 className="modal-title">
+                {selectedSite ? 'Редактирование площадки' : 'Новая площадка'}
+              </h3>
+
+              <div className="form-grid">
+                <label>
+                  <span className="field-label">
+                    Заказчик <span className="required">*</span>
+                  </span>
+                  <CustomSelect
+                    value={siteDraft.clientId}
+                    onChange={(event) => {
+                      const nextClientId = event.target.value
+                      const targetCustomer = customers.find((customer) => customer.id === nextClientId)
+                      setSiteDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              clientId: nextClientId,
+                              responsibleId: targetCustomer?.representatives[0]?.accountId ?? '',
+                            }
+                          : previous,
+                      )
+                    }}
+                    options={visibleCustomers.map((customer) => ({
+                      value: customer.id,
+                      label: customer.name,
+                    }))}
+                    placeholder={null}
+                    showPlaceholder={false}
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">
+                    Название площадки <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    value={siteDraft.name}
+                    onChange={(event) =>
+                      setSiteDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              name: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                    placeholder="Например, Центральный узел"
+                  />
+                </label>
+
+                <label className="full-width">
+                  <span className="field-label">
+                    Адрес площадки <span className="required">*</span>
+                  </span>
+                  <input
+                    className="text-input"
+                    value={siteDraft.address}
+                    onChange={(event) =>
+                      setSiteDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              address: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    required
+                    placeholder="Город, улица, дом"
+                  />
+                </label>
+
+                <label>
+                  <span className="field-label">
+                    Ответственный представитель <span className="required">*</span>
+                  </span>
+                  <CustomSelect
+                    value={siteDraft.responsibleId}
+                    onChange={(event) =>
+                      setSiteDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              responsibleId: event.target.value,
+                            }
+                          : previous,
+                      )
+                    }
+                    options={
+                      customers
+                        .find((customer) => customer.id === siteDraft.clientId)
+                        ?.representatives.map((representative) => ({
+                          value: representative.accountId,
+                          label: representative.fullName,
+                        })) ?? []
+                    }
+                    placeholder={null}
+                    showPlaceholder={false}
+                    required
+                  />
+                </label>
+
+                <label className="full-width">
+                  <span className="field-label">
+                    Продукты <span className="required">*</span>
+                  </span>
+                  <CustomMultiSelect
+                    value={siteDraft.productIds}
+                    onChange={(event) => {
+                      const selectedProducts = Array.from(event.target.selectedOptions).map(
+                        (option) => option.value,
+                      )
+
+                      setSiteDraft((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              productIds: selectedProducts,
+                            }
+                          : previous,
+                      )
+                    }}
+                    options={products.map((product) => ({
+                      value: product.id,
+                      label: product.name,
+                    }))}
+                    size={Math.max(3, Math.min(6, products.length))}
+                  />
+                  <span className="form-hint">Удерживайте Ctrl или Cmd, чтобы выбрать несколько продуктов.</span>
+                </label>
+              </div>
+
+              <div className="section-head-row modal-actions">
+                <button
+                  type="button"
+                  className="ghost-button button-sm"
+                  onClick={() => setSiteDraft(null)}
+                  disabled={isSiteSaving}
+                >
+                  Отмена
+                </button>
+                <button type="submit" className="primary-button button-sm" disabled={isSiteSaving}>
+                  {isSiteSaving ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+        </div>
       ) : null}
 
       {selectedSite && selectedCustomer ? (

@@ -254,6 +254,16 @@ label {
   color: var(--text-muted);
 }
 
+.required {
+  color: var(--danger);
+  margin-left: 2px;
+  font-weight: 600;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
 .text-input {
   width: 100%;
   border: 1px solid #d8c4a8;
@@ -586,6 +596,11 @@ label {
   display: flex;
 }
 
+.form-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .dashboard-tabs-row {
   display: flex;
   flex-wrap: wrap;
@@ -714,6 +729,85 @@ label {
   gap: 9px;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(37, 41, 38, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.modal-card {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: 92vh;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  box-shadow: 0 24px 60px rgba(37, 41, 38, 0.15);
+}
+
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d9c7ad;
+  border-radius: 9px;
+  background: #f6ece0;
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.modal-close:hover {
+  background: #efe2d1;
+  border-color: #c9b396;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.modal-form {
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 22px 24px;
+}
+
+.modal-form .form-grid {
+  gap: 14px 18px;
+}
+
+.modal-actions {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+
+.modal-photo-preview {
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px dashed #d4c0a4;
+  border-radius: var(--radius-md);
+  background: #fffaf2;
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -755,5 +849,22 @@ label {
 
   .link-control-row {
     flex-direction: column;
+  }
+
+  .modal-form {
+    padding: 18px;
+  }
+
+  .modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .modal-actions .button-sm {
+    width: 100%;
+  }
+
+  .modal-photo-preview {
+    flex-direction: column;
+    text-align: center;
   }
 }

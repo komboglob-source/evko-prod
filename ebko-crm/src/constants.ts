@@ -2,6 +2,7 @@ import type { AppealCriticality, AppealLinkType, AppealStatus, ModuleKey, UserRo
 
 export const MODULES: Array<{ key: ModuleKey; label: string }> = [
   { key: 'appeals', label: 'Обращения' },
+  { key: 'appeals_archive', label: 'Архив задач' },
   { key: 'employees', label: 'Сотрудники' },
   { key: 'customers', label: 'Заказчики' },
   { key: 'clients', label: 'Клиенты' },
