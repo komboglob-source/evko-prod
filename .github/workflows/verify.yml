@@ -1,0 +1,71 @@
+name: Verify
+
+on:
+  push:
+    branches:
+      - main
+      - pre-release-test
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: 0000
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: CRM_BE/go.mod
+
+      - name: Run backend tests
+        working-directory: CRM_BE
+        env:
+          TEST_DATABASE_ADMIN_URL: host=127.0.0.1 port=5432 user=user password=0000 dbname=postgres sslmode=disable
+        run: go test ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: CRM_FE/ebko-crm/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: CRM_FE/ebko-crm
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: CRM_FE/ebko-crm
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: CRM_FE/ebko-crm
+        run: npm run build

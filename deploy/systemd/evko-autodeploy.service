@@ -1,0 +1,12 @@
+[Unit]
+Description=Evko automatic deploy check
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=__EVKO_USER__
+WorkingDirectory=__EVKO_DIR__
+Environment=HOME=/home/__EVKO_USER__
+Environment=DEPLOY_BRANCH=main
+ExecStart=/bin/bash __EVKO_DIR__/scripts/check-and-deploy.sh

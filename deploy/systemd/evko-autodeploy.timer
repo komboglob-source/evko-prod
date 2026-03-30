@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Evko automatic deploy check every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=evko-autodeploy.service
+
+[Install]
+WantedBy=timers.target
