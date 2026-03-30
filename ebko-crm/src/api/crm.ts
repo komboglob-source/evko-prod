@@ -818,7 +818,7 @@ export async function syncAppealPatch(
     return loadAppealById(tokens, data, appealId)
   }
 
-  await checkResponse(
+  const response = await checkResponse(
     await fetch(`${API_BASE_URL}/api/v1/appeals/${appealId}`, {
       method: 'PATCH',
       headers: authHeaders(tokens),
@@ -826,7 +826,7 @@ export async function syncAppealPatch(
     }),
   )
 
-  return loadAppealById(tokens, data, appealId)
+  return normalizeAppeal(response, buildDictionaryMaps(data))
 }
 
 export async function syncAppealComment(
@@ -973,14 +973,18 @@ export async function syncClientUpsert(tokens: AuthTokens, client: ClientCompany
   return normalizeClient(response)
 }
 
-export async function syncClientDelete(tokens: AuthTokens, clientId: string): Promise<void> {
+export async function syncClientDelete(
+  tokens: AuthTokens,
+  clientId: string,
+  mode: 'delete' | 'unassign' = 'delete',
+): Promise<void> {
   if (USE_MOCK_DATA) {
     await wait(80)
     return
   }
 
   await checkResponse(
-    await fetch(`${API_BASE_URL}/api/v1/clients/${resolveNumericID(clientId)}`, {
+    await fetch(`${API_BASE_URL}/api/v1/clients/${resolveNumericID(clientId)}?mode=${mode}`, {
       method: 'DELETE',
       headers: authHeaders(tokens),
     }),

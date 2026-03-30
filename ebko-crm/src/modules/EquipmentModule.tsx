@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+﻿import { useMemo, useRef, useState, type FormEvent } from 'react'
 import type {
   ClientCompany,
   EquipmentType,
@@ -20,6 +20,9 @@ interface EquipmentModuleProps {
   onUpsertEquipment: (equipment: EquipmentUnit) => Promise<void>
   onDeleteEquipment: (equipmentId: string) => Promise<void>
 }
+
+const UNASSIGNED_CLIENT_FILTER = '__unassigned__'
+const UNASSIGNED_CLIENT_LABEL = '\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a \u043d\u0435 \u043d\u0430\u0437\u043d\u0430\u0447\u0435\u043d'
 
 function nextEquipmentId(equipment: EquipmentUnit[]): string {
   const max = equipment
@@ -84,7 +87,11 @@ export function EquipmentModule({
         equipmentTypes.find((type) => type.id === item.typeId)?.name.toLowerCase() ?? ''
       const siteName = site?.name.toLowerCase() ?? ''
 
-      if (clientFilter && site?.clientId !== clientFilter) {
+      if (clientFilter === UNASSIGNED_CLIENT_FILTER) {
+        if (site?.clientId) {
+          return false
+        }
+      } else if (clientFilter && site?.clientId !== clientFilter) {
         return false
       }
 
@@ -113,34 +120,34 @@ export function EquipmentModule({
       : null) ?? null
 
   function resolveTypeName(typeId: string): string {
-    return equipmentTypes.find((item) => item.id === typeId)?.name ?? 'Не задан'
+    return equipmentTypes.find((item) => item.id === typeId)?.name ?? 'РќРµ Р·Р°РґР°РЅ'
   }
 
   function resolveSiteName(siteId?: string): string {
     if (!siteId) {
-      return 'Не привязано'
+      return 'РќРµ РїСЂРёРІСЏР·Р°РЅРѕ'
     }
 
-    return sites.find((item) => item.id === siteId)?.name ?? 'Площадка не найдена'
+    return sites.find((item) => item.id === siteId)?.name ?? 'РџР»РѕС‰Р°РґРєР° РЅРµ РЅР°Р№РґРµРЅР°'
   }
 
   function resolveClientName(siteId?: string): string {
     if (!siteId) {
-      return 'Не определён'
+      return 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
     }
 
     const site = sites.find((item) => item.id === siteId)
-    return clients.find((client) => client.id === site?.clientId)?.name ?? 'Не определён'
+    return clients.find((client) => client.id === site?.clientId)?.name ?? 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
   }
 
   function resolveProductNames(siteId?: string): string {
     if (!siteId) {
-      return 'Не определён'
+      return 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
     }
 
     const site = sites.find((item) => item.id === siteId)
     if (!site || site.productIds.length === 0) {
-      return 'Не определён'
+      return 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
     }
 
     return site.productIds
@@ -169,7 +176,7 @@ export function EquipmentModule({
       setSelectedEquipmentId(safeDraft.id)
       setEquipmentDraft(null)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить оборудование.')
+      window.alert(error instanceof Error ? error.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РѕР±РѕСЂСѓРґРѕРІР°РЅРёРµ.')
     } finally {
       isSavingRef.current = false
       setIsSaving(false)
@@ -179,8 +186,8 @@ export function EquipmentModule({
   if (user.role === 'client') {
     return (
       <section className="module-wrap">
-        <h1>Оборудование</h1>
-        <p className="empty-state">У роли Клиент нет доступа к модулю оборудования.</p>
+        <h1>РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ</h1>
+        <p className="empty-state">РЈ СЂРѕР»Рё РљР»РёРµРЅС‚ РЅРµС‚ РґРѕСЃС‚СѓРїР° Рє РјРѕРґСѓР»СЋ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ.</p>
       </section>
     )
   }
@@ -188,7 +195,7 @@ export function EquipmentModule({
   return (
     <section className="module-wrap">
       <div className="module-title-row">
-        <h1>Оборудование</h1>
+        <h1>РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ</h1>
         {canEdit && !selectedEquipment && !equipmentDraft ? (
           <button
             type="button"
@@ -198,7 +205,7 @@ export function EquipmentModule({
               setSelectedEquipmentId(null)
             }}
           >
-            Добавить оборудование
+            Р”РѕР±Р°РІРёС‚СЊ РѕР±РѕСЂСѓРґРѕРІР°РЅРёРµ
           </button>
         ) : null}
       </div>
@@ -206,12 +213,13 @@ export function EquipmentModule({
       {!selectedEquipment && !equipmentDraft ? (
         <div className="form-grid">
           <label>
-            Заказчик
+            Р—Р°РєР°Р·С‡РёРє
             <CustomSelect
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
               options={[
-                { value: '', label: 'Все заказчики' },
+                { value: '', label: 'Р’СЃРµ Р·Р°РєР°Р·С‡РёРєРё' },
+                { value: UNASSIGNED_CLIENT_FILTER, label: UNASSIGNED_CLIENT_LABEL },
                 ...clients.map((client) => ({
                   value: client.id,
                   label: client.name,
@@ -223,12 +231,12 @@ export function EquipmentModule({
           </label>
 
           <label>
-            Продукт
+            РџСЂРѕРґСѓРєС‚
             <CustomSelect
               value={productFilter}
               onChange={(event) => setProductFilter(event.target.value)}
               options={[
-                { value: '', label: 'Все продукты' },
+                { value: '', label: 'Р’СЃРµ РїСЂРѕРґСѓРєС‚С‹' },
                 ...products.map((product) => ({
                   value: product.id,
                   label: product.name,
@@ -240,10 +248,10 @@ export function EquipmentModule({
           </label>
 
           <label>
-            Поиск
+            РџРѕРёСЃРє
             <input
               className="text-input"
-              placeholder="По названию, серийному номеру, типу или площадке"
+              placeholder="РџРѕ РЅР°Р·РІР°РЅРёСЋ, СЃРµСЂРёР№РЅРѕРјСѓ РЅРѕРјРµСЂСѓ, С‚РёРїСѓ РёР»Рё РїР»РѕС‰Р°РґРєРµ"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -263,7 +271,7 @@ export function EquipmentModule({
               className="modal-close"
               type="button"
               onClick={() => setEquipmentDraft(null)}
-              aria-label="Закрыть"
+              aria-label="Р—Р°РєСЂС‹С‚СЊ"
               disabled={isSaving}
             >
               x
@@ -271,13 +279,13 @@ export function EquipmentModule({
 
             <form className="inline-form modal-form" onSubmit={saveEquipment}>
               <h3 className="modal-title">
-                {selectedEquipment ? 'Редактирование оборудования' : 'Новая единица оборудования'}
+                {selectedEquipment ? 'Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ' : 'РќРѕРІР°СЏ РµРґРёРЅРёС†Р° РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ'}
               </h3>
 
               <div className="form-grid">
                 <label>
                   <span className="field-label">
-                    Тип оборудования <span className="required">*</span>
+                    РўРёРї РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ <span className="required">*</span>
                   </span>
                   <CustomSelect
                     value={equipmentDraft.typeId}
@@ -303,7 +311,7 @@ export function EquipmentModule({
 
                 <label>
                   <span className="field-label">
-                    Серийный номер <span className="required">*</span>
+                    РЎРµСЂРёР№РЅС‹Р№ РЅРѕРјРµСЂ <span className="required">*</span>
                   </span>
                   <input
                     className="text-input"
@@ -325,7 +333,7 @@ export function EquipmentModule({
 
                 <label>
                   <span className="field-label">
-                    Название <span className="required">*</span>
+                    РќР°Р·РІР°РЅРёРµ <span className="required">*</span>
                   </span>
                   <input
                     className="text-input"
@@ -341,13 +349,13 @@ export function EquipmentModule({
                       )
                     }
                     required
-                    placeholder="Например, Маршрутизатор Cisco"
+                    placeholder="РќР°РїСЂРёРјРµСЂ, РњР°СЂС€СЂСѓС‚РёР·Р°С‚РѕСЂ Cisco"
                   />
                 </label>
 
                 <label>
                   <span className="field-label">
-                    Вес (кг) <span className="required">*</span>
+                    Р’РµСЃ (РєРі) <span className="required">*</span>
                   </span>
                   <input
                     className="text-input"
@@ -370,7 +378,7 @@ export function EquipmentModule({
                 </label>
 
                 <label className="full-width">
-                  <span className="field-label">Площадка</span>
+                  <span className="field-label">РџР»РѕС‰Р°РґРєР°</span>
                   <CustomSelect
                     value={equipmentDraft.siteId ?? ''}
                     onChange={(event) =>
@@ -384,7 +392,7 @@ export function EquipmentModule({
                       )
                     }
                     options={[
-                      { value: '', label: 'Не указана' },
+                      { value: '', label: 'РќРµ СѓРєР°Р·Р°РЅР°' },
                       ...sites.map((site) => ({
                         value: site.id,
                         label: `${site.name} (${site.address})`,
@@ -397,7 +405,7 @@ export function EquipmentModule({
               </div>
 
               <label className="full-width">
-                <span className="field-label">Описание</span>
+                <span className="field-label">РћРїРёСЃР°РЅРёРµ</span>
                 <textarea
                   className="text-input text-area"
                   rows={4}
@@ -412,7 +420,7 @@ export function EquipmentModule({
                         : previous,
                     )
                   }
-                  placeholder="Короткое описание или примечание по оборудованию"
+                  placeholder="РљРѕСЂРѕС‚РєРѕРµ РѕРїРёСЃР°РЅРёРµ РёР»Рё РїСЂРёРјРµС‡Р°РЅРёРµ РїРѕ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЋ"
                 />
               </label>
 
@@ -423,10 +431,10 @@ export function EquipmentModule({
                   onClick={() => setEquipmentDraft(null)}
                   disabled={isSaving}
                 >
-                  Отмена
+                  РћС‚РјРµРЅР°
                 </button>
                 <button type="submit" className="primary-button button-sm" disabled={isSaving}>
-                  {isSaving ? 'Сохранение...' : 'Сохранить'}
+                  {isSaving ? 'РЎРѕС…СЂР°РЅРµРЅРёРµ...' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}
                 </button>
               </div>
             </form>
@@ -443,34 +451,34 @@ export function EquipmentModule({
               className="ghost-button button-sm"
               onClick={() => setSelectedEquipmentId(null)}
             >
-              К списку
+              Рљ СЃРїРёСЃРєСѓ
             </button>
           </div>
 
           <div className="data-columns">
             <div>
               <p>
-                <strong>Серийный номер:</strong> {selectedEquipment.serialNumber}
+                <strong>РЎРµСЂРёР№РЅС‹Р№ РЅРѕРјРµСЂ:</strong> {selectedEquipment.serialNumber}
               </p>
               <p>
-                <strong>Тип:</strong> {resolveTypeName(selectedEquipment.typeId)}
+                <strong>РўРёРї:</strong> {resolveTypeName(selectedEquipment.typeId)}
               </p>
               <p>
-                <strong>Вес:</strong> {selectedEquipment.weight} кг
+                <strong>Р’РµСЃ:</strong> {selectedEquipment.weight} РєРі
               </p>
               <p>
-                <strong>Площадка:</strong> {resolveSiteName(selectedEquipment.siteId)}
+                <strong>РџР»РѕС‰Р°РґРєР°:</strong> {resolveSiteName(selectedEquipment.siteId)}
               </p>
               <p>
-                <strong>Заказчик:</strong> {resolveClientName(selectedEquipment.siteId)}
+                <strong>Р—Р°РєР°Р·С‡РёРє:</strong> {resolveClientName(selectedEquipment.siteId)}
               </p>
               <p>
-                <strong>Продукты площадки:</strong> {resolveProductNames(selectedEquipment.siteId)}
+                <strong>РџСЂРѕРґСѓРєС‚С‹ РїР»РѕС‰Р°РґРєРё:</strong> {resolveProductNames(selectedEquipment.siteId)}
               </p>
             </div>
           </div>
 
-          <p>{selectedEquipment.description || 'Описание не указано.'}</p>
+          <p>{selectedEquipment.description || 'РћРїРёСЃР°РЅРёРµ РЅРµ СѓРєР°Р·Р°РЅРѕ.'}</p>
 
           {canEdit ? (
             <div className="section-head-row">
@@ -479,7 +487,7 @@ export function EquipmentModule({
                 className="primary-button button-sm"
                 onClick={() => setEquipmentDraft(selectedEquipment)}
               >
-                Редактировать
+                {'\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c'}
               </button>
               <button
                 type="button"
@@ -489,7 +497,7 @@ export function EquipmentModule({
                   setSelectedEquipmentId(null)
                 }}
               >
-                Удалить
+                РЈРґР°Р»РёС‚СЊ
               </button>
             </div>
           ) : null}
@@ -507,10 +515,10 @@ export function EquipmentModule({
                 <strong>{item.name}</strong>
                 <span>{resolveTypeName(item.typeId)}</span>
               </div>
-              <p>Серийный номер: {item.serialNumber}</p>
-              <p>Площадка: {resolveSiteName(item.siteId)}</p>
-              <p>Заказчик: {resolveClientName(item.siteId)}</p>
-              <p>Вес: {item.weight} кг</p>
+              <p>РЎРµСЂРёР№РЅС‹Р№ РЅРѕРјРµСЂ: {item.serialNumber}</p>
+              <p>РџР»РѕС‰Р°РґРєР°: {resolveSiteName(item.siteId)}</p>
+              <p>Р—Р°РєР°Р·С‡РёРє: {resolveClientName(item.siteId)}</p>
+              <p>Р’РµСЃ: {item.weight} РєРі</p>
             </button>
           ))}
         </div>

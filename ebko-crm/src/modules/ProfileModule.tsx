@@ -16,6 +16,7 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
   const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber)
   const [email, setEmail] = useState(user.email)
   const [isSaving, setIsSaving] = useState(false)
+  const canEditPosition = user.role !== 'ktp' && user.role !== 'wfm'
 
   useEffect(() => {
     setImage(user.image)
@@ -54,7 +55,7 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
 
             void onUpdateProfile({
               image,
-              position,
+              ...(canEditPosition ? { position } : {}),
               phoneNumber,
               email,
             })
@@ -76,8 +77,14 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
               <input
                 className="text-input"
                 value={position}
+                disabled={!canEditPosition}
                 onChange={(event) => setPosition(event.target.value)}
               />
+              {!canEditPosition ? (
+                <small className="field-hint">
+                  {'\u041e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u044b \u041a\u0422\u041f \u0438 WFM \u043d\u0435 \u043c\u043e\u0433\u0443\u0442 \u043c\u0435\u043d\u044f\u0442\u044c \u0441\u0432\u043e\u044e \u0434\u043e\u043b\u0436\u043d\u043e\u0441\u0442\u044c.'}
+                </small>
+              ) : null}
             </label>
 
             <label>

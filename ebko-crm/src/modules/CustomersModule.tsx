@@ -28,11 +28,15 @@ interface CustomersModuleProps {
   onSelectCustomer: (customerId: string | null) => void
   onSelectSite: (siteId: string | null) => void
   onUpsertCustomer: (customer: ClientCompany) => Promise<void>
-  onDeleteCustomer: (customerId: string) => Promise<void>
+  onDeleteCustomer: (customerId: string, mode: 'delete' | 'unassign') => Promise<void>
   onUpsertSite: (site: Site) => Promise<void>
   onDeleteSite: (siteId: string) => Promise<void>
   onAttachEquipmentToSite: (equipmentId: string, siteId: string) => Promise<void>
 }
+
+type CustomerDeleteMode = 'delete' | 'unassign'
+
+const UNASSIGNED_CUSTOMER_NAME = 'Неназначенные'
 
 function nextCustomerId(customers: ClientCompany[]): string {
   const max = customers
@@ -103,6 +107,8 @@ export function CustomersModule({
   const [productFilter, setProductFilter] = useState('')
   const [isCustomerSaving, setIsCustomerSaving] = useState(false)
   const [isSiteSaving, setIsSiteSaving] = useState(false)
+  const [customerToDelete, setCustomerToDelete] = useState<ClientCompany | null>(null)
+  const [isDeletingCustomer, setIsDeletingCustomer] = useState(false)
   const isCustomerSavingRef = useRef(false)
   const isSiteSavingRef = useRef(false)
 
@@ -158,6 +164,15 @@ export function CustomersModule({
     ? visibleSites.filter((site) => site.clientId === selectedCustomer.id)
     : []
 
+  const customerToDeleteSites = customerToDelete
+    ? visibleSites.filter((site) => site.clientId === customerToDelete.id)
+    : []
+
+  const customerToDeleteEquipmentCount = customerToDeleteSites.reduce(
+    (total, site) => total + equipment.filter((item) => item.siteId === site.id).length,
+    0,
+  )
+
   const selectedSiteEquipment = selectedSite
     ? equipment.filter((item) => item.siteId === selectedSite.id)
     : []
@@ -165,6 +180,9 @@ export function CustomersModule({
   const availableEquipmentToAttach = selectedSite
     ? equipment.filter((item) => !item.siteId)
     : []
+
+  const isSelectedCustomerProtected =
+    selectedCustomer?.name.trim().toLowerCase() === UNASSIGNED_CUSTOMER_NAME.toLowerCase()
 
   function resolveEquipmentTypeName(typeId: string): string {
     return equipmentTypes.find((type) => type.id === typeId)?.name ?? 'Не задан'
@@ -229,6 +247,27 @@ export function CustomersModule({
     } finally {
       isSiteSavingRef.current = false
       setIsSiteSaving(false)
+    }
+  }
+
+  async function deleteCustomerWithMode(mode: CustomerDeleteMode): Promise<void> {
+    if (!customerToDelete || isDeletingCustomer) {
+      return
+    }
+
+    setIsDeletingCustomer(true)
+
+    try {
+      await onDeleteCustomer(customerToDelete.id, mode)
+      setCustomerToDelete(null)
+      onSelectCustomer(null)
+      onSelectSite(null)
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : 'Не удалось удалить заказчика.',
+      )
+    } finally {
+      setIsDeletingCustomer(false)
     }
   }
 
@@ -602,6 +641,90 @@ export function CustomersModule({
         </div>
       ) : null}
 
+      {customerToDelete ? (
+        <div
+          className="modal-overlay"
+          onClick={(event) =>
+            !isDeletingCustomer &&
+            event.target === event.currentTarget &&
+            setCustomerToDelete(null)
+          }
+        >
+          <div className="modal-card">
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setCustomerToDelete(null)}
+              aria-label="Закрыть"
+              disabled={isDeletingCustomer}
+            >
+              x
+            </button>
+
+            <div className="inline-form modal-form">
+              <h3 className="modal-title">Удаление заказчика</h3>
+              <p>
+                Выберите, что делать со связанными сущностями заказчика{' '}
+                <strong>{customerToDelete.name}</strong>.
+              </p>
+              <div className="preview-box">
+                <p>Представителей: {customerToDelete.representatives.length}</p>
+                <p>Площадок: {customerToDeleteSites.length}</p>
+                <p>Оборудования на площадках: {customerToDeleteEquipmentCount}</p>
+              </div>
+
+              <div className="plain-card">
+                <strong>Перевести в "Неназначенные"</strong>
+                <p>
+                  Представители, площадки и обращения сохранятся, но перейдут на
+                  системного заказчика. Оборудование останется на своих площадках.
+                </p>
+              </div>
+
+              <div className="plain-card">
+                <strong>Удалить полностью</strong>
+                <p>
+                  Заказчик, представители, площадки, оборудование и связанные обращения
+                  будут удалены. Контакты представителей освободятся и их можно будет
+                  использовать повторно.
+                </p>
+              </div>
+
+              <div className="section-head-row modal-actions">
+                <button
+                  type="button"
+                  className="ghost-button button-sm"
+                  onClick={() => setCustomerToDelete(null)}
+                  disabled={isDeletingCustomer}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="primary-button button-sm"
+                  onClick={() => {
+                    void deleteCustomerWithMode('unassign')
+                  }}
+                  disabled={isDeletingCustomer}
+                >
+                  В неназначенные
+                </button>
+                <button
+                  type="button"
+                  className="danger-button button-sm"
+                  onClick={() => {
+                    void deleteCustomerWithMode('delete')
+                  }}
+                  disabled={isDeletingCustomer}
+                >
+                  {isDeletingCustomer ? 'Удаление...' : 'Удалить полностью'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {selectedSite && selectedCustomer ? (
         <article className="details-screen">
           <div className="module-title-row">
@@ -788,24 +911,28 @@ export function CustomersModule({
 
           {canEditCustomers ? (
             <div className="section-head-row">
-              <button
-                type="button"
-                className="primary-button button-sm"
-                onClick={() => setCustomerDraft(selectedCustomer)}
-              >
-                Редактировать заказчика
-              </button>
-              <button
-                type="button"
-                className="danger-button button-sm"
-                onClick={() => {
-                  void onDeleteCustomer(selectedCustomer.id)
-                  onSelectCustomer(null)
-                  onSelectSite(null)
-                }}
-              >
-                Удалить заказчика
-              </button>
+              {!isSelectedCustomerProtected ? (
+                <>
+                  <button
+                    type="button"
+                    className="primary-button button-sm"
+                    onClick={() => setCustomerDraft(selectedCustomer)}
+                  >
+                    Редактировать заказчика
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button button-sm"
+                    onClick={() => setCustomerToDelete(selectedCustomer)}
+                  >
+                    Удалить заказчика
+                  </button>
+                </>
+              ) : (
+                <p className="form-hint">
+                  Системный заказчик хранит отвязанные площадки, представителей и обращения.
+                </p>
+              )}
             </div>
           ) : null}
         </article>

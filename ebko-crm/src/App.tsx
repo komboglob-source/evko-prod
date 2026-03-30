@@ -447,10 +447,19 @@ function App() {
   }
 
   async function updateAppeal(appealId: string, patch: Partial<Appeal>): Promise<void> {
+    const currentAppeal =
+      currentData.appeals.find((appeal) => appeal.id === appealId) ?? null
     const updatedAppeal = await withFreshTokens((activeTokens) =>
       syncAppealPatch(activeTokens, currentData, appealId, patch),
     )
-    replaceAppeals([updatedAppeal])
+    replaceAppeals([
+      {
+        ...updatedAppeal,
+        comments: currentAppeal?.comments ?? updatedAppeal.comments,
+        linkedTicketIds: currentAppeal?.linkedTicketIds ?? updatedAppeal.linkedTicketIds,
+        links: currentAppeal?.links ?? updatedAppeal.links,
+      },
+    ])
   }
 
   async function addComment(appealId: string, contents: string, files: FileAttachment[]): Promise<void> {
@@ -502,8 +511,11 @@ function App() {
     setSelectedCustomerId(savedCustomer.id)
   }
 
-  async function deleteCustomer(customerId: string): Promise<void> {
-    await withFreshTokens((activeTokens) => syncClientDelete(activeTokens, customerId))
+  async function deleteCustomer(
+    customerId: string,
+    mode: 'delete' | 'unassign' = 'delete',
+  ): Promise<void> {
+    await withFreshTokens((activeTokens) => syncClientDelete(activeTokens, customerId, mode))
     await refreshData()
   }
 

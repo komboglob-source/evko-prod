@@ -234,8 +234,10 @@ export function AppealsModule({
   const [responsibleFilter, setResponsibleFilter] = useState('')
   const [createdByFilter, setCreatedByFilter] = useState('')
   const [isCreating, setIsCreating] = useState(false)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isTakingInWork, setIsTakingInWork] = useState(false)
   const isCreatingRef = useRef(false)
+  const isSavingEditRef = useRef(false)
 
   const viewableAppeals = appeals.filter((appeal) => canViewAppeal(user, appeal))
 
@@ -408,30 +410,43 @@ export function AppealsModule({
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!selectedAppeal || !editState) {
+    if (!selectedAppeal || !editState || isSavingEditRef.current) {
       return
     }
+
+    isSavingEditRef.current = true
+    setIsSavingEdit(true)
 
     const nextStatus = editState.statusId
+    try {
+      await onUpdateAppeal(selectedAppeal.id, {
+        description: editState.description,
+        statusId: editState.statusId,
+        criticalityId: editState.criticalityId,
+        clientId: editState.clientId,
+        siteId: editState.siteId || undefined,
+        productId: editState.productId || undefined,
+        responsibleId: editState.responsibleId || undefined,
+        updatedAt: new Date().toISOString(),
+        updatedBy: user.id,
+      })
 
-    await onUpdateAppeal(selectedAppeal.id, {
-      description: editState.description,
-      statusId: editState.statusId,
-      criticalityId: editState.criticalityId,
-      clientId: editState.clientId,
-      siteId: editState.siteId || undefined,
-      productId: editState.productId || undefined,
-      responsibleId: editState.responsibleId || undefined,
-      updatedAt: new Date().toISOString(),
-      updatedBy: user.id,
-    })
+      if (!archiveMode && nextStatus === 'Verified') {
+        selectAppeal(null)
+        return
+      }
 
-    if (!archiveMode && nextStatus === 'Verified') {
-      selectAppeal(null)
-      return
+      setEditState(null)
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РёР·РјРµРЅРµРЅРёСЏ РѕР±СЂР°С‰РµРЅРёСЏ.',
+      )
+    } finally {
+      isSavingEditRef.current = false
+      setIsSavingEdit(false)
     }
-
-    setEditState(null)
   }
 
   async function handleCommentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -677,6 +692,7 @@ export function AppealsModule({
                     Статус
                     <CustomSelect
                       value={editState.statusId}
+                      disabled={isSavingEdit}
                       onChange={(event) =>
                         setEditState((previous) =>
                           previous
@@ -704,6 +720,7 @@ export function AppealsModule({
                     Критичность
                     <CustomSelect
                       value={editState.criticalityId}
+                      disabled={isSavingEdit}
                       onChange={(event) =>
                         setEditState((previous) =>
                           previous
@@ -725,6 +742,7 @@ export function AppealsModule({
                       Клиент
                       <CustomSelect
                         value={editState.clientId}
+                        disabled={isSavingEdit}
                         onChange={(event) =>
                           setEditState((previous) =>
                             previous
@@ -751,6 +769,7 @@ export function AppealsModule({
                     Площадка
                     <CustomSelect
                       value={editState.siteId}
+                      disabled={isSavingEdit}
                       onChange={(event) =>
                         setEditState((previous) =>
                           previous
@@ -778,6 +797,7 @@ export function AppealsModule({
                     Продукт
                     <CustomSelect
                       value={editState.productId}
+                      disabled={isSavingEdit}
                       onChange={(event) =>
                         setEditState((previous) =>
                           previous
@@ -804,6 +824,7 @@ export function AppealsModule({
                     Ответственный
                     <CustomSelect
                       value={editState.responsibleId}
+                      disabled={isSavingEdit}
                       onChange={(event) =>
                         setEditState((previous) =>
                           previous
@@ -837,6 +858,7 @@ export function AppealsModule({
                     className="text-input text-area"
                     rows={6}
                     value={editState.description}
+                    disabled={isSavingEdit}
                     onChange={(event) =>
                       setEditState((previous) =>
                         previous
@@ -859,12 +881,13 @@ export function AppealsModule({
                 ) : null}
 
                 <div className="section-head-row">
-                  <button type="submit" className="primary-button button-sm">
-                    Сохранить
+                  <button type="submit" className="primary-button button-sm" disabled={isSavingEdit}>
+                    {isSavingEdit ? 'Сохранение...' : 'Сохранить'}
                   </button>
                   <button
                     type="button"
                     className="ghost-button button-sm"
+                    disabled={isSavingEdit}
                     onClick={() => setEditState(null)}
                   >
                     Отмена
