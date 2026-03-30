@@ -344,9 +344,20 @@ export function EmployeesModule({
       ) : null}
 
       {draft ? (
-        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setDraft(null)}>
+        <div
+          className="modal-overlay"
+          onClick={(event) =>
+            !isSaving && event.target === event.currentTarget && setDraft(null)
+          }
+        >
           <div className="modal-card">
-            <button className="modal-close" type="button" onClick={() => setDraft(null)} aria-label="Закрыть">
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setDraft(null)}
+              aria-label="Закрыть"
+              disabled={isSaving}
+            >
               x
             </button>
 

@@ -314,7 +314,9 @@ export function CustomersModule({
       {customerDraft ? (
         <div
           className="modal-overlay"
-          onClick={(event) => event.target === event.currentTarget && setCustomerDraft(null)}
+          onClick={(event) =>
+            !isCustomerSaving && event.target === event.currentTarget && setCustomerDraft(null)
+          }
         >
           <div className="modal-card">
             <button
@@ -322,6 +324,7 @@ export function CustomersModule({
               type="button"
               onClick={() => setCustomerDraft(null)}
               aria-label="Закрыть"
+              disabled={isCustomerSaving}
             >
               x
             </button>
@@ -428,7 +431,9 @@ export function CustomersModule({
       {siteDraft ? (
         <div
           className="modal-overlay"
-          onClick={(event) => event.target === event.currentTarget && setSiteDraft(null)}
+          onClick={(event) =>
+            !isSiteSaving && event.target === event.currentTarget && setSiteDraft(null)
+          }
         >
           <div className="modal-card">
             <button
@@ -436,6 +441,7 @@ export function CustomersModule({
               type="button"
               onClick={() => setSiteDraft(null)}
               aria-label="Закрыть"
+              disabled={isSiteSaving}
             >
               x
             </button>

@@ -254,7 +254,9 @@ export function EquipmentModule({
       {equipmentDraft ? (
         <div
           className="modal-overlay"
-          onClick={(event) => event.target === event.currentTarget && setEquipmentDraft(null)}
+          onClick={(event) =>
+            !isSaving && event.target === event.currentTarget && setEquipmentDraft(null)
+          }
         >
           <div className="modal-card">
             <button
@@ -262,6 +264,7 @@ export function EquipmentModule({
               type="button"
               onClick={() => setEquipmentDraft(null)}
               aria-label="Закрыть"
+              disabled={isSaving}
             >
               x
             </button>

@@ -1012,7 +1012,9 @@ export function AppealsModule({
       {!archiveMode && isCreateOpen ? (
         <div
           className="modal-overlay"
-          onClick={(event) => event.target === event.currentTarget && setIsCreateOpen(false)}
+          onClick={(event) =>
+            !isCreating && event.target === event.currentTarget && setIsCreateOpen(false)
+          }
         >
           <div className="modal-card">
             <button
@@ -1020,6 +1022,7 @@ export function AppealsModule({
               type="button"
               onClick={() => setIsCreateOpen(false)}
               aria-label="Закрыть"
+              disabled={isCreating}
             >
               x
             </button>
