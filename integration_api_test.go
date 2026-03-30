@@ -515,6 +515,207 @@ func TestClientsRepresentativesAndSites(t *testing.T) {
 	})
 }
 
+func TestClientDeleteModesAndContactRelease(t *testing.T) {
+	withFreshServer(t, func(t *testing.T, serverURL string) {
+		admin := login(t, serverURL, "Admin", "admin")
+
+		status, body := authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/clients", admin.AccessToken, map[string]any{
+			"name":    "Detach Client",
+			"address": "Moscow, Detach 1",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var detachClient clientResponse
+		decodeJSON(t, body, &detachClient)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/clients/%d/representatives", serverURL, detachClient.ID), admin.AccessToken, map[string]any{
+			"login":        "DetachRepresentative",
+			"password":     "secret123",
+			"full_name":    "Detach Representative",
+			"phone_number": "+7 900 331 11 22",
+			"email":        "detach-representative@example.com",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var detachRepresentative representativeResponse
+		decodeJSON(t, body, &detachRepresentative)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/sites", admin.AccessToken, map[string]any{
+			"responsible_id": detachRepresentative.AccountID,
+			"name":           "Detach Site",
+			"address":        "Moscow, Detach Site",
+			"product_ids":    []int{1},
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var detachSite siteResponse
+		decodeJSON(t, body, &detachSite)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/equipment", admin.AccessToken, map[string]any{
+			"type_id":       1,
+			"site_id":       detachSite.ID,
+			"serial_number": "DETACH-SERIAL-001",
+			"name":          "Detach Equipment",
+			"description":   "detach equipment",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var detachEquipment equipmentResponse
+		decodeJSON(t, body, &detachEquipment)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/appeals", admin.AccessToken, map[string]any{
+			"title":          "Detach Appeal",
+			"description":    "Detach appeal body",
+			"type_id":        1,
+			"status_id":      1,
+			"criticality_id": 1,
+			"client_id":      detachClient.ID,
+			"site_id":        detachSite.ID,
+			"product_id":     1,
+			"responsible_id": detachRepresentative.AccountID,
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var detachAppeal appealResponse
+		decodeJSON(t, body, &detachAppeal)
+
+		status, body = authorizedJSONRequest(t, http.MethodDelete, fmt.Sprintf("%s/api/v1/clients/%d?mode=unassign", serverURL, detachClient.ID), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusNoContent, body)
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, serverURL+"/api/v1/clients", admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var clients []clientResponse
+		decodeJSON(t, body, &clients)
+		unassignedClient := findClientByName(clients, "Неназначенные")
+		if unassignedClient == nil {
+			t.Fatalf("unassigned client should be created after detach delete: %+v", clients)
+		}
+
+		foundRepresentative := false
+		for _, representative := range unassignedClient.Representatives {
+			if representative.AccountID == detachRepresentative.AccountID {
+				foundRepresentative = true
+			}
+		}
+		if !foundRepresentative {
+			t.Fatalf("representative should be moved to unassigned client: %+v", unassignedClient.Representatives)
+		}
+
+		repTokens := login(t, serverURL, "DetachRepresentative", "secret123")
+		if repTokens.AccessToken == "" {
+			t.Fatal("representative should still be able to login after unassign delete")
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/sites?responsible_id=%d", serverURL, detachRepresentative.AccountID), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var sites []siteResponse
+		decodeJSON(t, body, &sites)
+		afterDetachSite := findSiteByID(sites, detachSite.ID)
+		if afterDetachSite == nil || afterDetachSite.ClientID != unassignedClient.ID {
+			t.Fatalf("site should move to unassigned client after customer delete: %+v", sites)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/equipment?serial_number=DETACH-SERIAL-001", serverURL), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var equipmentItems []equipmentResponse
+		decodeJSON(t, body, &equipmentItems)
+		afterDetachEquipment := findEquipmentByID(equipmentItems, detachEquipment.ID)
+		if afterDetachEquipment == nil || afterDetachEquipment.SiteID == nil || *afterDetachEquipment.SiteID != detachSite.ID {
+			t.Fatalf("equipment should remain attached to preserved site: %+v", equipmentItems)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/appeals?id=%d&client_id=%d", serverURL, detachAppeal.ID, unassignedClient.ID), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var detachAppeals []appealResponse
+		decodeJSON(t, body, &detachAppeals)
+		foundAppeal := false
+		for _, item := range detachAppeals {
+			if item.ID == detachAppeal.ID && item.ClientID == unassignedClient.ID {
+				foundAppeal = true
+			}
+		}
+		if !foundAppeal {
+			t.Fatalf("appeal should move to unassigned client after customer delete: %+v", detachAppeals)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/clients", admin.AccessToken, map[string]any{
+			"name":    "Release Client",
+			"address": "Moscow, Release 1",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var releaseClient clientResponse
+		decodeJSON(t, body, &releaseClient)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/clients/%d/representatives", serverURL, releaseClient.ID), admin.AccessToken, map[string]any{
+			"login":        "ReleaseRepresentative",
+			"password":     "secret123",
+			"full_name":    "Release Representative",
+			"phone_number": "+7 900 441 11 22",
+			"email":        "release-representative@example.com",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var releaseRepresentative representativeResponse
+		decodeJSON(t, body, &releaseRepresentative)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/sites", admin.AccessToken, map[string]any{
+			"responsible_id": releaseRepresentative.AccountID,
+			"name":           "Release Site",
+			"address":        "Moscow, Release Site",
+			"product_ids":    []int{1},
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var releaseSite siteResponse
+		decodeJSON(t, body, &releaseSite)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/equipment", admin.AccessToken, map[string]any{
+			"type_id":       1,
+			"site_id":       releaseSite.ID,
+			"serial_number": "RELEASE-SERIAL-001",
+			"name":          "Release Equipment",
+			"description":   "release equipment",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var releaseEquipment equipmentResponse
+		decodeJSON(t, body, &releaseEquipment)
+
+		status, body = authorizedJSONRequest(t, http.MethodDelete, fmt.Sprintf("%s/api/v1/clients/%d?mode=delete", serverURL, releaseClient.ID), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusNoContent, body)
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/equipment?serial_number=RELEASE-SERIAL-001", serverURL), admin.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &equipmentItems)
+		if findEquipmentByID(equipmentItems, releaseEquipment.ID) != nil {
+			t.Fatalf("release equipment should be deleted with full client delete: %+v", equipmentItems)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, serverURL+"/api/v1/clients", admin.AccessToken, map[string]any{
+			"name":    "Reused Client",
+			"address": "Moscow, Reused 1",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		var reusedClient clientResponse
+		decodeJSON(t, body, &reusedClient)
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/clients/%d/representatives", serverURL, reusedClient.ID), admin.AccessToken, map[string]any{
+			"login":        "ReleaseRepresentative",
+			"password":     "secret123",
+			"full_name":    "Release Representative Recreated",
+			"phone_number": "+7 900 441 11 22",
+			"email":        "release-representative@example.com",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+	})
+}
+
 func TestEquipmentCRUDAndFilters(t *testing.T) {
 	withFreshServer(t, func(t *testing.T, serverURL string) {
 		admin := login(t, serverURL, "Admin", "admin")

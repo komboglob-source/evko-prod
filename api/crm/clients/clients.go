@@ -55,6 +55,13 @@ type clientListFilters struct {
 	Query                   string
 }
 
+const (
+	clientDeleteModeDelete   = "delete"
+	clientDeleteModeUnassign = "unassign"
+	unassignedClientName     = "Неназначенные"
+	unassignedClientAddress  = "Системная группа для отвязанных сущностей"
+)
+
 func handleClientUniqueViolation(w http.ResponseWriter, err error) bool {
 	if !utils.IsUniqueViolation(err) {
 		return false
@@ -134,6 +141,10 @@ func CreateClientHandler(w http.ResponseWriter, r *http.Request) {
 
 	name := strings.TrimSpace(*body.Name)
 	address := strings.TrimSpace(*body.Address)
+	if isProtectedSystemClientName(name) {
+		http.Error(w, "client name is reserved", http.StatusConflict)
+		return
+	}
 
 	exists, err := clientWithSameDataExists(name, address, nil)
 	if err != nil {
@@ -178,6 +189,10 @@ func UpdateClientHandler(w http.ResponseWriter, r *http.Request, clientID int64)
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
+	if isProtectedSystemClientName(currentClient.Name) {
+		http.Error(w, "system client cannot be modified", http.StatusConflict)
+		return
+	}
 
 	var body upsertClientRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
@@ -188,6 +203,10 @@ func UpdateClientHandler(w http.ResponseWriter, r *http.Request, clientID int64)
 	nextName := currentClient.Name
 	if body.Name != nil {
 		nextName = strings.TrimSpace(*body.Name)
+	}
+	if isProtectedSystemClientName(nextName) && !isProtectedSystemClientName(currentClient.Name) {
+		http.Error(w, "client name is reserved", http.StatusConflict)
+		return
 	}
 	nextAddress := currentClient.Address
 	if body.Address != nil {
@@ -271,7 +290,50 @@ func UpdateClientHandler(w http.ResponseWriter, r *http.Request, clientID int64)
 }
 
 func DeleteClientHandler(w http.ResponseWriter, r *http.Request, clientID int64) {
-	result, err := database.DB.Exec(`
+	deleteMode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mode")))
+	if deleteMode == "" {
+		deleteMode = clientDeleteModeDelete
+	}
+	if deleteMode != clientDeleteModeDelete && deleteMode != clientDeleteModeUnassign {
+		http.Error(w, "invalid delete mode", http.StatusBadRequest)
+		return
+	}
+
+	tx, err := database.DB.Begin()
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	clientName, err := getClientNameTx(tx, clientID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "client not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if isProtectedSystemClientName(clientName) {
+		http.Error(w, "system client cannot be deleted", http.StatusConflict)
+		return
+	}
+
+	switch deleteMode {
+	case clientDeleteModeDelete:
+		if err := deleteClientRepresentativeAccountsTx(tx, clientID); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+	case clientDeleteModeUnassign:
+		if err := moveClientEntitiesToUnassignedTx(tx, clientID); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	result, err := tx.Exec(`
 		DELETE FROM "crm"."Clients"
 		WHERE id = $1
 	`, clientID)
@@ -287,6 +349,11 @@ func DeleteClientHandler(w http.ResponseWriter, r *http.Request, clientID int64)
 	}
 	if affected == 0 {
 		http.Error(w, "client not found", http.StatusNotFound)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
 
@@ -628,4 +695,105 @@ func clientWithSameDataExists(name string, address string, excludeID *int64) (bo
 	var exists bool
 	err := database.DB.QueryRow(query, args...).Scan(&exists)
 	return exists, err
+}
+
+func isProtectedSystemClientName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), unassignedClientName)
+}
+
+func getClientNameTx(tx *sql.Tx, clientID int64) (string, error) {
+	var clientName string
+	err := tx.QueryRow(`
+		SELECT name
+		FROM "crm"."Clients"
+		WHERE id = $1
+	`, clientID).Scan(&clientName)
+	return clientName, err
+}
+
+func deleteClientRepresentativeAccountsTx(tx *sql.Tx, clientID int64) error {
+	rows, err := tx.Query(`
+		SELECT account_id
+		FROM "crm"."Representatives"
+		WHERE client_id = $1
+		ORDER BY account_id
+	`, clientID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	accountIDs := make([]int64, 0)
+	for rows.Next() {
+		var accountID int64
+		if err := rows.Scan(&accountID); err != nil {
+			return err
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, accountID := range accountIDs {
+		if _, err := tx.Exec(`
+			DELETE FROM "auth"."Accounts"
+			WHERE id = $1
+		`, accountID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func moveClientEntitiesToUnassignedTx(tx *sql.Tx, clientID int64) error {
+	unassignedClientID, err := ensureUnassignedClientTx(tx)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE "crm"."Representatives"
+		SET client_id = $1
+		WHERE client_id = $2
+	`, unassignedClientID, clientID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE "tasks"."Tickets"
+		SET client_id = $1
+		WHERE client_id = $2
+	`, unassignedClientID, clientID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureUnassignedClientTx(tx *sql.Tx) (int64, error) {
+	var clientID int64
+	err := tx.QueryRow(`
+		SELECT id
+		FROM "crm"."Clients"
+		WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+	`, unassignedClientName).Scan(&clientID)
+	if err == nil {
+		return clientID, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+
+	err = tx.QueryRow(`
+		INSERT INTO "crm"."Clients" (name, address, ceo_id)
+		VALUES ($1, $2, NULL)
+		RETURNING id
+	`, unassignedClientName, unassignedClientAddress).Scan(&clientID)
+	if err != nil {
+		return 0, err
+	}
+
+	return clientID, nil
 }
