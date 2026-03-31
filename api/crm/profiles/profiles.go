@@ -93,34 +93,6 @@ func PatchProfileMeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var currentRole string
-	var currentPosition sql.NullString
-	if body.Position != nil {
-		err = database.DB.QueryRow(`
-			SELECT roles.name, profiles.position
-			FROM "auth"."Accounts" accounts
-			JOIN "auth"."Roles" roles ON roles.id = accounts.role_id
-			JOIN "profiles"."Profiles" profiles ON profiles.account_id = accounts.id
-			WHERE accounts.id = $1
-		`, accountID).Scan(&currentRole, &currentPosition)
-		if err == sql.ErrNoRows {
-			http.Error(w, "profile not found", http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, "database error", http.StatusInternalServerError)
-			return
-		}
-
-		if currentRole == "ktp" || currentRole == "wfm" {
-			nextPosition := strings.TrimSpace(*body.Position)
-			if nextPosition != strings.TrimSpace(currentPosition.String) {
-				http.Error(w, "position cannot be changed for this role", http.StatusForbidden)
-				return
-			}
-		}
-	}
-
 	setClauses := make([]string, 0)
 	args := make([]any, 0)
 	argPos := 1
@@ -164,7 +136,7 @@ func PatchProfileMeHandler(w http.ResponseWriter, r *http.Request) {
 			argPos++
 		}
 	}
-	if body.Position != nil && currentRole != "ktp" && currentRole != "wfm" {
+	if body.Position != nil {
 		setClauses = append(setClauses, "position = $"+itoa(argPos))
 		args = append(args, strings.TrimSpace(*body.Position))
 		argPos++
