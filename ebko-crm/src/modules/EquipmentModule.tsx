@@ -120,34 +120,34 @@ export function EquipmentModule({
       : null) ?? null
 
   function resolveTypeName(typeId: string): string {
-    return equipmentTypes.find((item) => item.id === typeId)?.name ?? 'РќРµ Р·Р°РґР°РЅ'
+    return equipmentTypes.find((item) => item.id === typeId)?.name ?? 'Не задан'
   }
 
   function resolveSiteName(siteId?: string): string {
     if (!siteId) {
-      return 'РќРµ РїСЂРёРІСЏР·Р°РЅРѕ'
+      return 'Не привязано'
     }
 
-    return sites.find((item) => item.id === siteId)?.name ?? 'РџР»РѕС‰Р°РґРєР° РЅРµ РЅР°Р№РґРµРЅР°'
+    return sites.find((item) => item.id === siteId)?.name ?? 'Площадка не найдена'
   }
 
   function resolveClientName(siteId?: string): string {
     if (!siteId) {
-      return 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
+      return 'Не определён'
     }
 
     const site = sites.find((item) => item.id === siteId)
-    return clients.find((client) => client.id === site?.clientId)?.name ?? 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
+    return clients.find((client) => client.id === site?.clientId)?.name ?? 'Не определён'
   }
 
   function resolveProductNames(siteId?: string): string {
     if (!siteId) {
-      return 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
+      return 'Не определён'
     }
 
     const site = sites.find((item) => item.id === siteId)
     if (!site || site.productIds.length === 0) {
-      return 'РќРµ РѕРїСЂРµРґРµР»С‘РЅ'
+      return 'Не определён'
     }
 
     return site.productIds
@@ -176,7 +176,7 @@ export function EquipmentModule({
       setSelectedEquipmentId(safeDraft.id)
       setEquipmentDraft(null)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РѕР±РѕСЂСѓРґРѕРІР°РЅРёРµ.')
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить оборудование.')
     } finally {
       isSavingRef.current = false
       setIsSaving(false)
@@ -186,8 +186,8 @@ export function EquipmentModule({
   if (user.role === 'client') {
     return (
       <section className="module-wrap">
-        <h1>РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ</h1>
-        <p className="empty-state">РЈ СЂРѕР»Рё РљР»РёРµРЅС‚ РЅРµС‚ РґРѕСЃС‚СѓРїР° Рє РјРѕРґСѓР»СЋ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ.</p>
+        <h1>Оборудование</h1>
+        <p className="empty-state">У роли Клиент нет доступа к модулю оборудования.</p>
       </section>
     )
   }
@@ -195,7 +195,7 @@ export function EquipmentModule({
   return (
     <section className="module-wrap">
       <div className="module-title-row">
-        <h1>РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ</h1>
+        <h1>Оборудование</h1>
         {canEdit && !selectedEquipment && !equipmentDraft ? (
           <button
             type="button"
@@ -205,7 +205,7 @@ export function EquipmentModule({
               setSelectedEquipmentId(null)
             }}
           >
-            Р”РѕР±Р°РІРёС‚СЊ РѕР±РѕСЂСѓРґРѕРІР°РЅРёРµ
+            Добавить оборудование
           </button>
         ) : null}
       </div>
@@ -213,12 +213,12 @@ export function EquipmentModule({
       {!selectedEquipment && !equipmentDraft ? (
         <div className="form-grid">
           <label>
-            Р—Р°РєР°Р·С‡РёРє
+            Заказчик
             <CustomSelect
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
               options={[
-                { value: '', label: 'Р’СЃРµ Р·Р°РєР°Р·С‡РёРєРё' },
+                { value: '', label: 'Все заказчики' },
                 { value: UNASSIGNED_CLIENT_FILTER, label: UNASSIGNED_CLIENT_LABEL },
                 ...clients.map((client) => ({
                   value: client.id,
@@ -231,12 +231,12 @@ export function EquipmentModule({
           </label>
 
           <label>
-            РџСЂРѕРґСѓРєС‚
+            Продукт
             <CustomSelect
               value={productFilter}
               onChange={(event) => setProductFilter(event.target.value)}
               options={[
-                { value: '', label: 'Р’СЃРµ РїСЂРѕРґСѓРєС‚С‹' },
+                { value: '', label: 'Все продукты' },
                 ...products.map((product) => ({
                   value: product.id,
                   label: product.name,
@@ -248,10 +248,10 @@ export function EquipmentModule({
           </label>
 
           <label>
-            РџРѕРёСЃРє
+            Поиск
             <input
               className="text-input"
-              placeholder="РџРѕ РЅР°Р·РІР°РЅРёСЋ, СЃРµСЂРёР№РЅРѕРјСѓ РЅРѕРјРµСЂСѓ, С‚РёРїСѓ РёР»Рё РїР»РѕС‰Р°РґРєРµ"
+              placeholder="По названию, серийному номеру, типу или площадке"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -271,7 +271,7 @@ export function EquipmentModule({
               className="modal-close"
               type="button"
               onClick={() => setEquipmentDraft(null)}
-              aria-label="Р—Р°РєСЂС‹С‚СЊ"
+              aria-label="Закрыть"
               disabled={isSaving}
             >
               x
@@ -279,13 +279,13 @@ export function EquipmentModule({
 
             <form className="inline-form modal-form" onSubmit={saveEquipment}>
               <h3 className="modal-title">
-                {selectedEquipment ? 'Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ' : 'РќРѕРІР°СЏ РµРґРёРЅРёС†Р° РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ'}
+                {selectedEquipment ? 'Редактирование оборудования' : 'Новая единица оборудования'}
               </h3>
 
               <div className="form-grid">
                 <label>
                   <span className="field-label">
-                    РўРёРї РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ <span className="required">*</span>
+                    Тип оборудования <span className="required">*</span>
                   </span>
                   <CustomSelect
                     value={equipmentDraft.typeId}
@@ -311,7 +311,7 @@ export function EquipmentModule({
 
                 <label>
                   <span className="field-label">
-                    РЎРµСЂРёР№РЅС‹Р№ РЅРѕРјРµСЂ <span className="required">*</span>
+                    Серийный номер <span className="required">*</span>
                   </span>
                   <input
                     className="text-input"
@@ -333,7 +333,7 @@ export function EquipmentModule({
 
                 <label>
                   <span className="field-label">
-                    РќР°Р·РІР°РЅРёРµ <span className="required">*</span>
+                    Название <span className="required">*</span>
                   </span>
                   <input
                     className="text-input"
@@ -349,13 +349,13 @@ export function EquipmentModule({
                       )
                     }
                     required
-                    placeholder="РќР°РїСЂРёРјРµСЂ, РњР°СЂС€СЂСѓС‚РёР·Р°С‚РѕСЂ Cisco"
+                    placeholder="Например, Маршрутизатор Cisco"
                   />
                 </label>
 
                 <label>
                   <span className="field-label">
-                    Р’РµСЃ (РєРі) <span className="required">*</span>
+                    Вес (кг) <span className="required">*</span>
                   </span>
                   <input
                     className="text-input"
@@ -378,7 +378,7 @@ export function EquipmentModule({
                 </label>
 
                 <label className="full-width">
-                  <span className="field-label">РџР»РѕС‰Р°РґРєР°</span>
+                  <span className="field-label">Площадка</span>
                   <CustomSelect
                     value={equipmentDraft.siteId ?? ''}
                     onChange={(event) =>
@@ -392,7 +392,7 @@ export function EquipmentModule({
                       )
                     }
                     options={[
-                      { value: '', label: 'РќРµ СѓРєР°Р·Р°РЅР°' },
+                      { value: '', label: 'Не указана' },
                       ...sites.map((site) => ({
                         value: site.id,
                         label: `${site.name} (${site.address})`,
@@ -405,7 +405,7 @@ export function EquipmentModule({
               </div>
 
               <label className="full-width">
-                <span className="field-label">РћРїРёСЃР°РЅРёРµ</span>
+                <span className="field-label">Описание</span>
                 <textarea
                   className="text-input text-area"
                   rows={4}
@@ -420,7 +420,7 @@ export function EquipmentModule({
                         : previous,
                     )
                   }
-                  placeholder="РљРѕСЂРѕС‚РєРѕРµ РѕРїРёСЃР°РЅРёРµ РёР»Рё РїСЂРёРјРµС‡Р°РЅРёРµ РїРѕ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЋ"
+                  placeholder="Короткое описание или примечание по оборудованию"
                 />
               </label>
 
@@ -431,10 +431,10 @@ export function EquipmentModule({
                   onClick={() => setEquipmentDraft(null)}
                   disabled={isSaving}
                 >
-                  РћС‚РјРµРЅР°
+                  Отмена
                 </button>
                 <button type="submit" className="primary-button button-sm" disabled={isSaving}>
-                  {isSaving ? 'РЎРѕС…СЂР°РЅРµРЅРёРµ...' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}
+                  {isSaving ? 'Сохранение...' : 'Сохранить'}
                 </button>
               </div>
             </form>
@@ -451,34 +451,34 @@ export function EquipmentModule({
               className="ghost-button button-sm"
               onClick={() => setSelectedEquipmentId(null)}
             >
-              Рљ СЃРїРёСЃРєСѓ
+              К списку
             </button>
           </div>
 
           <div className="data-columns">
             <div>
               <p>
-                <strong>РЎРµСЂРёР№РЅС‹Р№ РЅРѕРјРµСЂ:</strong> {selectedEquipment.serialNumber}
+                <strong>Серийный номер:</strong> {selectedEquipment.serialNumber}
               </p>
               <p>
-                <strong>РўРёРї:</strong> {resolveTypeName(selectedEquipment.typeId)}
+                <strong>Тип:</strong> {resolveTypeName(selectedEquipment.typeId)}
               </p>
               <p>
-                <strong>Р’РµСЃ:</strong> {selectedEquipment.weight} РєРі
+                <strong>Вес:</strong> {selectedEquipment.weight} кг
               </p>
               <p>
-                <strong>РџР»РѕС‰Р°РґРєР°:</strong> {resolveSiteName(selectedEquipment.siteId)}
+                <strong>Площадка:</strong> {resolveSiteName(selectedEquipment.siteId)}
               </p>
               <p>
-                <strong>Р—Р°РєР°Р·С‡РёРє:</strong> {resolveClientName(selectedEquipment.siteId)}
+                <strong>Заказчик:</strong> {resolveClientName(selectedEquipment.siteId)}
               </p>
               <p>
-                <strong>РџСЂРѕРґСѓРєС‚С‹ РїР»РѕС‰Р°РґРєРё:</strong> {resolveProductNames(selectedEquipment.siteId)}
+                <strong>Продукты площадки:</strong> {resolveProductNames(selectedEquipment.siteId)}
               </p>
             </div>
           </div>
 
-          <p>{selectedEquipment.description || 'РћРїРёСЃР°РЅРёРµ РЅРµ СѓРєР°Р·Р°РЅРѕ.'}</p>
+          <p>{selectedEquipment.description || 'Описание не указано.'}</p>
 
           {canEdit ? (
             <div className="section-head-row">
@@ -497,7 +497,7 @@ export function EquipmentModule({
                   setSelectedEquipmentId(null)
                 }}
               >
-                РЈРґР°Р»РёС‚СЊ
+                Удалить
               </button>
             </div>
           ) : null}
@@ -515,10 +515,10 @@ export function EquipmentModule({
                 <strong>{item.name}</strong>
                 <span>{resolveTypeName(item.typeId)}</span>
               </div>
-              <p>РЎРµСЂРёР№РЅС‹Р№ РЅРѕРјРµСЂ: {item.serialNumber}</p>
-              <p>РџР»РѕС‰Р°РґРєР°: {resolveSiteName(item.siteId)}</p>
-              <p>Р—Р°РєР°Р·С‡РёРє: {resolveClientName(item.siteId)}</p>
-              <p>Р’РµСЃ: {item.weight} РєРі</p>
+              <p>Серийный номер: {item.serialNumber}</p>
+              <p>Площадка: {resolveSiteName(item.siteId)}</p>
+              <p>Заказчик: {resolveClientName(item.siteId)}</p>
+              <p>Вес: {item.weight} кг</p>
             </button>
           ))}
         </div>

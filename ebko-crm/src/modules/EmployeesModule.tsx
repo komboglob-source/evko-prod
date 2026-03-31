@@ -419,6 +419,7 @@ export function EmployeesModule({
                   <input
                     className="text-input"
                     type="date"
+                    max={today}
                     value={draft.hireDate}
                     onChange={(event) =>
                       setDraft((previous) =>
