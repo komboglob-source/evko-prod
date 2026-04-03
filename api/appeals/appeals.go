@@ -107,6 +107,7 @@ const (
 	appealLockedMessage          = "appeal is verified and cannot be changed"
 	appealImmutableFieldsMessage = "title and type cannot be changed"
 	appealPendingSubtasksMessage = "parent appeal cannot be completed before all subtasks are done"
+	closedCommentPermissionMsg   = "closed comments are available only for crm employees"
 )
 
 type scanner interface {
@@ -635,7 +636,13 @@ func CommentsHandler(w http.ResponseWriter, r *http.Request, path string, appeal
 }
 
 func ListCommentsHandler(w http.ResponseWriter, r *http.Request, appealID int64) {
-	items, err := listCommentsByAppealID(appealID)
+	canAccessClosed, err := currentUserCanAccessClosedComments(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+
+	items, err := listCommentsByAppealID(appealID, canAccessClosed)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -670,10 +677,19 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request, appealID int64
 		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
 		return
 	}
+	canAccessClosed, err := currentUserCanAccessClosedComments(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
 
 	isClosedComment := false
 	if body.IsClosedComment != nil {
 		isClosedComment = *body.IsClosedComment
+	}
+	if isClosedComment && !canAccessClosed {
+		http.Error(w, closedCommentPermissionMsg, http.StatusForbidden)
+		return
 	}
 
 	var commentID int64
@@ -687,7 +703,7 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request, appealID int64
 		return
 	}
 
-	item, err := getCommentByID(appealID, commentID)
+	item, err := getCommentByID(appealID, commentID, canAccessClosed)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -697,7 +713,12 @@ func CreateCommentHandler(w http.ResponseWriter, r *http.Request, appealID int64
 }
 
 func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, commentID int64) {
-	if !commentBelongsToAppeal(appealID, commentID) {
+	canAccessClosed, err := currentUserCanAccessClosedComments(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+	if !commentBelongsToAppeal(appealID, commentID, canAccessClosed) {
 		http.Error(w, "comment not found", http.StatusNotFound)
 		return
 	}
@@ -715,6 +736,10 @@ func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, comm
 	var body updateCommentRequest
 	if err := utils.DecodeJSONBody(r, &body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	if body.IsClosedComment != nil && *body.IsClosedComment && !canAccessClosed {
+		http.Error(w, closedCommentPermissionMsg, http.StatusForbidden)
 		return
 	}
 
@@ -741,7 +766,7 @@ func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, comm
 		return
 	}
 
-	item, err := getCommentByID(appealID, commentID)
+	item, err := getCommentByID(appealID, commentID, canAccessClosed)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -751,6 +776,16 @@ func UpdateCommentHandler(w http.ResponseWriter, r *http.Request, appealID, comm
 }
 
 func DeleteCommentHandler(w http.ResponseWriter, r *http.Request, appealID, commentID int64) {
+	canAccessClosed, err := currentUserCanAccessClosedComments(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+	if !commentBelongsToAppeal(appealID, commentID, canAccessClosed) {
+		http.Error(w, "comment not found", http.StatusNotFound)
+		return
+	}
+
 	verified, err := isAppealVerified(appealID)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
@@ -928,7 +963,12 @@ func DeleteLinkHandler(w http.ResponseWriter, r *http.Request, appealID, linkedA
 }
 
 func ReactionsHandler(w http.ResponseWriter, r *http.Request, path string, appealID, commentID int64) {
-	if !commentBelongsToAppeal(appealID, commentID) {
+	canAccessClosed, err := currentUserCanAccessClosedComments(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+	if !commentBelongsToAppeal(appealID, commentID, canAccessClosed) {
 		http.Error(w, "comment not found", http.StatusNotFound)
 		return
 	}
@@ -939,7 +979,7 @@ func ReactionsHandler(w http.ResponseWriter, r *http.Request, path string, appea
 			http.Error(w, "incorrect method on reactions", http.StatusMethodNotAllowed)
 			return
 		}
-		AddReactionHandler(w, r, appealID, commentID)
+		AddReactionHandler(w, r, appealID, commentID, canAccessClosed)
 		return
 	}
 
@@ -953,10 +993,10 @@ func ReactionsHandler(w http.ResponseWriter, r *http.Request, path string, appea
 		http.Error(w, "incorrect method on reactions", http.StatusMethodNotAllowed)
 		return
 	}
-	DeleteReactionHandler(w, r, appealID, commentID, reactionID)
+	DeleteReactionHandler(w, r, appealID, commentID, reactionID, canAccessClosed)
 }
 
-func AddReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commentID int64) {
+func AddReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commentID int64, canAccessClosed bool) {
 	verified, err := isAppealVerified(appealID)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
@@ -996,7 +1036,7 @@ func AddReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commen
 		return
 	}
 
-	item, err := getCommentByID(appealID, commentID)
+	item, err := getCommentByID(appealID, commentID, canAccessClosed)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
@@ -1005,7 +1045,12 @@ func AddReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commen
 	utils.WriteJSON(w, http.StatusCreated, item)
 }
 
-func DeleteReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commentID, reactionID int64) {
+func DeleteReactionHandler(w http.ResponseWriter, r *http.Request, appealID, commentID, reactionID int64, canAccessClosed bool) {
+	if !commentBelongsToAppeal(appealID, commentID, canAccessClosed) {
+		http.Error(w, "comment not found", http.StatusNotFound)
+		return
+	}
+
 	verified, err := isAppealVerified(appealID)
 	if err != nil {
 		http.Error(w, "database error", http.StatusInternalServerError)
@@ -1091,7 +1136,7 @@ func scanAppeal(row scanner) (appealResponse, error) {
 	return item, nil
 }
 
-func listCommentsByAppealID(appealID int64) ([]commentResponse, error) {
+func listCommentsByAppealID(appealID int64, includeClosed bool) ([]commentResponse, error) {
 	rows, err := database.DB.Query(`
 		SELECT
 			comments.id,
@@ -1105,8 +1150,9 @@ func listCommentsByAppealID(appealID int64) ([]commentResponse, error) {
 		FROM "tasks"."Comments" comments
 		JOIN "profiles"."Profiles" profiles ON profiles.account_id = comments.created_by
 		WHERE comments.ticket_id = $1
+			AND ($2 OR comments.is_closed_comment = false)
 		ORDER BY comments.created_at, comments.id
-	`, appealID)
+	`, appealID, includeClosed)
 	if err != nil {
 		return nil, err
 	}
@@ -1140,8 +1186,8 @@ func listCommentsByAppealID(appealID int64) ([]commentResponse, error) {
 	return items, nil
 }
 
-func getCommentByID(appealID, commentID int64) (commentResponse, error) {
-	items, err := listCommentsByAppealID(appealID)
+func getCommentByID(appealID, commentID int64, includeClosed bool) (commentResponse, error) {
+	items, err := listCommentsByAppealID(appealID, includeClosed)
 	if err != nil {
 		return commentResponse{}, err
 	}
@@ -1279,16 +1325,26 @@ func existsByQuery(query string, arg any) bool {
 	return err == nil && exists
 }
 
-func commentBelongsToAppeal(appealID, commentID int64) bool {
+func commentBelongsToAppeal(appealID, commentID int64, includeClosed bool) bool {
 	var exists bool
 	err := database.DB.QueryRow(`
 		SELECT EXISTS (
 			SELECT 1
 			FROM "tasks"."Comments"
 			WHERE id = $1 AND ticket_id = $2
+				AND ($3 OR is_closed_comment = false)
 		)
-	`, commentID, appealID).Scan(&exists)
+	`, commentID, appealID, includeClosed).Scan(&exists)
 	return err == nil && exists
+}
+
+func currentUserCanAccessClosedComments(r *http.Request) (bool, error) {
+	roleName, err := utils.GetCurrentRoleName(r)
+	if err != nil {
+		return false, err
+	}
+
+	return roleName != "client", nil
 }
 
 func statusIDByName(name string) (int, error) {

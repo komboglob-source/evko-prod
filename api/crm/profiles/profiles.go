@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +36,25 @@ type patchProfileMeRequest struct {
 	Position    *string `json:"position"`
 }
 
+type taskDashboardFiltersPayload struct {
+	Status      string `json:"status"`
+	Criticality string `json:"criticality"`
+	Type        string `json:"type"`
+	Search      string `json:"search"`
+}
+
+type taskDashboardSortPayload struct {
+	Field     string `json:"field"`
+	Direction string `json:"direction"`
+}
+
+type taskDashboardPayload struct {
+	ID      string                      `json:"id"`
+	Name    string                      `json:"name"`
+	Filters taskDashboardFiltersPayload `json:"filters"`
+	Sort    taskDashboardSortPayload    `json:"sort"`
+}
+
 func handleProfileUniqueViolation(w http.ResponseWriter, err error) bool {
 	if !utils.IsUniqueViolation(err) {
 		return false
@@ -45,18 +65,27 @@ func handleProfileUniqueViolation(w http.ResponseWriter, err error) bool {
 }
 
 func HandleAPIRequest(w http.ResponseWriter, r *http.Request, path string) {
-	if path != "/me" && path != "/me/" {
-		http.Error(w, "unknown url path", http.StatusNotFound)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		GetProfileMeHandler(w, r)
-	case http.MethodPatch:
-		PatchProfileMeHandler(w, r)
+	switch path {
+	case "/me", "/me/":
+		switch r.Method {
+		case http.MethodGet:
+			GetProfileMeHandler(w, r)
+		case http.MethodPatch:
+			PatchProfileMeHandler(w, r)
+		default:
+			http.Error(w, "incorrect method on profiles", http.StatusMethodNotAllowed)
+		}
+	case "/me/dashboards", "/me/dashboards/":
+		switch r.Method {
+		case http.MethodGet:
+			GetProfileDashboardsHandler(w, r)
+		case http.MethodPut:
+			PutProfileDashboardsHandler(w, r)
+		default:
+			http.Error(w, "incorrect method on profile dashboards", http.StatusMethodNotAllowed)
+		}
 	default:
-		http.Error(w, "incorrect method on profiles", http.StatusMethodNotAllowed)
+		http.Error(w, "unknown url path", http.StatusNotFound)
 	}
 }
 
@@ -78,6 +107,60 @@ func GetProfileMeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.WriteJSON(w, http.StatusOK, profile)
+}
+
+func GetProfileDashboardsHandler(w http.ResponseWriter, r *http.Request) {
+	accountID, err := utils.GetCurrentAccountID(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+
+	dashboards, err := getTaskDashboardsByAccountID(accountID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, dashboards)
+}
+
+func PutProfileDashboardsHandler(w http.ResponseWriter, r *http.Request) {
+	accountID, err := utils.GetCurrentAccountID(r)
+	if err != nil {
+		http.Error(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+
+	var body []taskDashboardPayload
+	if err := utils.DecodeJSONBody(r, &body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+
+	dashboards, err := sanitizeTaskDashboards(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	payload, err := json.Marshal(dashboards)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := database.DB.Exec(`
+		INSERT INTO "profiles"."TaskDashboards" (account_id, payload)
+		VALUES ($1, $2::jsonb)
+		ON CONFLICT (account_id)
+		DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
+	`, accountID, string(payload)); err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, dashboards)
 }
 
 func PatchProfileMeHandler(w http.ResponseWriter, r *http.Request) {
@@ -243,4 +326,101 @@ func getProfileByAccountID(accountID int64) (profileMeResponse, error) {
 
 func itoa(v int) string {
 	return strconv.Itoa(v)
+}
+
+func getTaskDashboardsByAccountID(accountID int64) ([]taskDashboardPayload, error) {
+	var payload []byte
+	err := database.DB.QueryRow(`
+		SELECT payload
+		FROM "profiles"."TaskDashboards"
+		WHERE account_id = $1
+	`, accountID).Scan(&payload)
+	if err == sql.ErrNoRows {
+		return make([]taskDashboardPayload, 0), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var dashboards []taskDashboardPayload
+	if err := json.Unmarshal(payload, &dashboards); err != nil {
+		return nil, err
+	}
+	if dashboards == nil {
+		return make([]taskDashboardPayload, 0), nil
+	}
+
+	return sanitizeTaskDashboards(dashboards)
+}
+
+func sanitizeTaskDashboards(items []taskDashboardPayload) ([]taskDashboardPayload, error) {
+	if len(items) > 20 {
+		return nil, errInvalidDashboardsPayload()
+	}
+
+	seenIDs := make(map[string]struct{}, len(items))
+	result := make([]taskDashboardPayload, 0, len(items))
+
+	for _, item := range items {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Name = strings.TrimSpace(item.Name)
+		item.Filters.Status = strings.TrimSpace(item.Filters.Status)
+		item.Filters.Criticality = strings.TrimSpace(item.Filters.Criticality)
+		item.Filters.Type = strings.TrimSpace(item.Filters.Type)
+		item.Filters.Search = strings.TrimSpace(item.Filters.Search)
+		item.Sort.Field = strings.TrimSpace(item.Sort.Field)
+		item.Sort.Direction = strings.TrimSpace(item.Sort.Direction)
+
+		if item.ID == "" || item.Name == "" {
+			return nil, errInvalidDashboardsPayload()
+		}
+		if len(item.ID) > 128 || len(item.Name) > 128 || len(item.Filters.Search) > 255 {
+			return nil, errInvalidDashboardsPayload()
+		}
+		if _, exists := seenIDs[item.ID]; exists {
+			return nil, errInvalidDashboardsPayload()
+		}
+		seenIDs[item.ID] = struct{}{}
+
+		if !containsString([]string{"all", "Created", "Opened", "Customer Pending", "Done", "Verified"}, item.Filters.Status) {
+			return nil, errInvalidDashboardsPayload()
+		}
+		if !containsString([]string{"all", "Basic", "Important", "Critical"}, item.Filters.Criticality) {
+			return nil, errInvalidDashboardsPayload()
+		}
+		if !containsString([]string{"all", "KTP", "WFM"}, item.Filters.Type) {
+			return nil, errInvalidDashboardsPayload()
+		}
+		if !containsString([]string{"updatedAt", "createdAt", "criticality", "title"}, item.Sort.Field) {
+			return nil, errInvalidDashboardsPayload()
+		}
+		if !containsString([]string{"asc", "desc"}, item.Sort.Direction) {
+			return nil, errInvalidDashboardsPayload()
+		}
+
+		result = append(result, item)
+	}
+
+	return result, nil
+}
+
+func errInvalidDashboardsPayload() error {
+	return &dashboardValidationError{message: "invalid dashboards payload"}
+}
+
+type dashboardValidationError struct {
+	message string
+}
+
+func (err *dashboardValidationError) Error() string {
+	return err.message
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }

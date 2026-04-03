@@ -9,6 +9,25 @@ import (
 	"testing"
 )
 
+type taskDashboardFiltersPayload struct {
+	Status      string `json:"status"`
+	Criticality string `json:"criticality"`
+	Type        string `json:"type"`
+	Search      string `json:"search"`
+}
+
+type taskDashboardSortPayload struct {
+	Field     string `json:"field"`
+	Direction string `json:"direction"`
+}
+
+type taskDashboardPayload struct {
+	ID      string                      `json:"id"`
+	Name    string                      `json:"name"`
+	Filters taskDashboardFiltersPayload `json:"filters"`
+	Sort    taskDashboardSortPayload    `json:"sort"`
+}
+
 func TestAuthBootstrapProfileAndAuthLifecycle(t *testing.T) {
 	withFreshServer(t, func(t *testing.T, serverURL string) {
 		tokens := login(t, serverURL, "admin", "admin")
@@ -76,6 +95,61 @@ func TestAuthBootstrapProfileAndAuthLifecycle(t *testing.T) {
 		}
 		if updatedMe.Image != patchPayload["image"] {
 			t.Fatalf("image = %q, want %q", updatedMe.Image, patchPayload["image"])
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, serverURL+"/api/v1/profiles/me/dashboards", tokens.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var initialDashboards []taskDashboardPayload
+		decodeJSON(t, body, &initialDashboards)
+		if len(initialDashboards) != 0 {
+			t.Fatalf("initial dashboards should be empty, got %+v", initialDashboards)
+		}
+
+		dashboardsPayload := []taskDashboardPayload{
+			{
+				ID:   "dashboard-a",
+				Name: "Мои обращения",
+				Filters: taskDashboardFiltersPayload{
+					Status:      "all",
+					Criticality: "all",
+					Type:        "all",
+					Search:      "",
+				},
+				Sort: taskDashboardSortPayload{
+					Field:     "updatedAt",
+					Direction: "desc",
+				},
+			},
+			{
+				ID:   "dashboard-b",
+				Name: "Критичные KTP",
+				Filters: taskDashboardFiltersPayload{
+					Status:      "Opened",
+					Criticality: "Critical",
+					Type:        "KTP",
+					Search:      "узел",
+				},
+				Sort: taskDashboardSortPayload{
+					Field:     "criticality",
+					Direction: "desc",
+				},
+			},
+		}
+		status, body = authorizedJSONRequest(t, http.MethodPut, serverURL+"/api/v1/profiles/me/dashboards", tokens.AccessToken, dashboardsPayload)
+		requireStatus(t, status, http.StatusOK, body)
+
+		var savedDashboards []taskDashboardPayload
+		decodeJSON(t, body, &savedDashboards)
+		if len(savedDashboards) != 2 || savedDashboards[1].Filters.Type != "KTP" {
+			t.Fatalf("saved dashboards mismatch: %+v", savedDashboards)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodGet, serverURL+"/api/v1/profiles/me/dashboards", tokens.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &savedDashboards)
+		if len(savedDashboards) != 2 || savedDashboards[0].ID != "dashboard-a" {
+			t.Fatalf("reloaded dashboards mismatch: %+v", savedDashboards)
 		}
 
 		status, body = authorizedJSONRequest(t, http.MethodPatch, serverURL+"/api/v1/profiles/me", tokens.AccessToken, map[string]any{
@@ -1076,6 +1150,26 @@ func TestAppealCommentsLinksAndReactions(t *testing.T) {
 		if !updatedComment.IsClosedComment || updatedComment.Contents != "Autotest comment updated" {
 			t.Fatalf("updated comment mismatch: %+v", updatedComment)
 		}
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/appeals/%d/comments", serverURL, parentAppeal.ID), admin.AccessToken, map[string]any{
+			"contents": "Visible comment",
+		})
+		requireStatus(t, status, http.StatusCreated, body)
+
+		clientTokens := login(t, serverURL, "Client", "client")
+		status, body = authorizedJSONRequest(t, http.MethodGet, fmt.Sprintf("%s/api/v1/appeals/%d/comments", serverURL, parentAppeal.ID), clientTokens.AccessToken, nil)
+		requireStatus(t, status, http.StatusOK, body)
+		decodeJSON(t, body, &comments)
+		if len(comments) != 1 || comments[0].IsClosedComment || comments[0].Contents != "Visible comment" {
+			t.Fatalf("client should only see open comments: %+v", comments)
+		}
+
+		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/appeals/%d/comments", serverURL, parentAppeal.ID), clientTokens.AccessToken, map[string]any{
+			"contents":          "Client secret comment",
+			"is_closed_comment": true,
+		})
+		requireStatus(t, status, http.StatusForbidden, body)
+		requireTrimmedBody(t, body, "closed comments are available only for crm employees")
 
 		status, body = authorizedJSONRequest(t, http.MethodPost, fmt.Sprintf("%s/api/v1/appeals/%d/comments/%d/reactions", serverURL, parentAppeal.ID, createdComment.ID), admin.AccessToken, map[string]any{
 			"reaction_id": bootstrap.Reactions[0].ID,
