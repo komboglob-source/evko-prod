@@ -231,7 +231,7 @@ export function renderMarkdown(markdown: string): ReactNode[] {
       continue
     }
 
-    const blockquoteMatch = trimmedLine.match(/^>\s+(.+)$/)
+    const blockquoteMatch = trimmedLine.match(/^>\s*(.+)$/)
     if (blockquoteMatch) {
       flushParagraph()
       flushUnorderedList()

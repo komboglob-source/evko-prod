@@ -1073,6 +1073,37 @@ export function AppealsModule({
             )}
           </aside>
         </div>
+
+        {isCommentPreviewOpen ? (
+          <div
+            className="modal-overlay"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setIsCommentPreviewOpen(false)
+              }
+            }}
+          >
+            <div className="modal-card">
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => setIsCommentPreviewOpen(false)}
+                aria-label="Закрыть"
+              >
+                x
+              </button>
+
+              <div className="inline-form modal-form">
+                <h3 className="modal-title">Предосмотр комментария</h3>
+                {commentText.trim() ? (
+                  <div className="preview-box markdown-content">{renderMarkdown(commentText)}</div>
+                ) : (
+                  <p className="empty-inline">Комментарий пока пуст.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
     )
   }
@@ -1264,37 +1295,6 @@ export function AppealsModule({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      ) : null}
-
-      {isCommentPreviewOpen ? (
-        <div
-          className="modal-overlay"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsCommentPreviewOpen(false)
-            }
-          }}
-        >
-          <div className="modal-card">
-            <button
-              className="modal-close"
-              type="button"
-              onClick={() => setIsCommentPreviewOpen(false)}
-              aria-label="Закрыть"
-            >
-              x
-            </button>
-
-            <div className="inline-form modal-form">
-              <h3 className="modal-title">Предосмотр комментария</h3>
-              {commentText.trim() ? (
-                <div className="preview-box markdown-content">{renderMarkdown(commentText)}</div>
-              ) : (
-                <p className="empty-inline">Комментарий пока пуст.</p>
-              )}
-            </div>
           </div>
         </div>
       ) : null}
