@@ -128,6 +128,10 @@ export function canLinkAppeals(user: UserProfile): boolean {
   return user.role === 'admin' || user.role === 'ktp' || user.role === 'wfm'
 }
 
+export function canAccessClosedComments(user: UserProfile): boolean {
+  return user.role !== 'client'
+}
+
 export function canViewEmployeeCredentials(user: UserProfile): boolean {
   return user.role === 'admin'
 }

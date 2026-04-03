@@ -1,5 +1,12 @@
 import { findMockUserByCredentials } from '../mockData'
-import type { AuthTokens, LoginPayload, LoginResult, RefreshPayload, UserProfile } from '../types'
+import type {
+  AuthTokens,
+  LoginPayload,
+  LoginResult,
+  RefreshPayload,
+  TaskDashboard,
+  UserProfile,
+} from '../types'
 import { formatPhoneNumber } from '../utils/phone'
 import { createRandomTokenFragment } from '../utils/random'
 import { API_BASE_URL, MOCK_NETWORK_DELAY_MS, USE_MOCK_DATA, wait } from './config'
@@ -92,6 +99,56 @@ function parseUser(payload: unknown): UserProfile | null {
   return parseProfile(safePayload.user)
 }
 
+function parseTaskDashboard(payload: unknown): TaskDashboard | null {
+  if (!payload || typeof payload !== 'object') {
+    return null
+  }
+
+  const safeDashboard = payload as Record<string, unknown>
+  const id = readStringValue(safeDashboard.id)
+  const name = readStringValue(safeDashboard.name)
+  const safeFilters =
+    safeDashboard.filters && typeof safeDashboard.filters === 'object'
+      ? (safeDashboard.filters as Record<string, unknown>)
+      : {}
+  const safeSort =
+    safeDashboard.sort && typeof safeDashboard.sort === 'object'
+      ? (safeDashboard.sort as Record<string, unknown>)
+      : {}
+
+  if (!id || !name) {
+    return null
+  }
+
+  return {
+    id,
+    name,
+    filters: {
+      status: (readStringValue(safeFilters.status) as TaskDashboard['filters']['status']) ?? 'all',
+      criticality:
+        (readStringValue(safeFilters.criticality) as TaskDashboard['filters']['criticality']) ??
+        'all',
+      type: (readStringValue(safeFilters.type) as TaskDashboard['filters']['type']) ?? 'all',
+      search: readStringValue(safeFilters.search) ?? '',
+    },
+    sort: {
+      field: (readStringValue(safeSort.field) as TaskDashboard['sort']['field']) ?? 'updatedAt',
+      direction:
+        (readStringValue(safeSort.direction) as TaskDashboard['sort']['direction']) ?? 'desc',
+    },
+  }
+}
+
+function parseTaskDashboards(payload: unknown): TaskDashboard[] {
+  if (!Array.isArray(payload)) {
+    return []
+  }
+
+  return payload
+    .map((item) => parseTaskDashboard(item))
+    .filter((item): item is TaskDashboard => item !== null)
+}
+
 function withOptionalProfileString(
   body: Record<string, unknown>,
   key: string,
@@ -163,6 +220,45 @@ export async function syncCurrentProfile(
   }
 
   return profile
+}
+
+export async function loadTaskDashboards(tokens: AuthTokens): Promise<TaskDashboard[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me/dashboards`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      return []
+    }
+
+    return parseTaskDashboards((await response.json()) as unknown)
+  } catch {
+    return []
+  }
+}
+
+export async function syncTaskDashboards(
+  tokens: AuthTokens,
+  dashboards: TaskDashboard[],
+): Promise<TaskDashboard[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me/dashboards`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${tokens.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(dashboards),
+  })
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status)
+  }
+
+  return parseTaskDashboards((await response.json()) as unknown)
 }
 
 function generateMockTokens(): AuthTokens {

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CustomSelect } from '../components/CustomSelect'
 import { CRITICALITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, STATUS_ORDER } from '../constants'
 import type {
   Appeal,
@@ -13,7 +14,6 @@ import type {
   TaskDashboardSort,
   UserProfile,
 } from '../types'
-import { CustomSelect } from '../components/CustomSelect'
 import { formatDateTime } from '../utils/format'
 import { createRandomId } from '../utils/random'
 
@@ -24,12 +24,14 @@ interface TaskBoardModuleProps {
   clients: ClientCompany[]
   sites: Site[]
   products: ProductCatalogItem[]
+  dashboards: TaskDashboard[]
+  onSaveDashboards: (dashboards: TaskDashboard[]) => Promise<void>
   onOpenAppeal: (appealId: string, archived: boolean) => void
 }
 
-const DASHBOARD_STORAGE_PREFIX = 'ebko-crm-task-dashboards-v2'
 const VERIFIED_RETENTION_DAYS = 7
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
+const DASHBOARD_SAVE_DEBOUNCE_MS = 350
 
 const defaultFilters: TaskDashboardFilters = {
   status: 'all',
@@ -50,43 +52,6 @@ function createDashboard(name = 'Мои обращения'): TaskDashboard {
     filters: { ...defaultFilters },
     sort: { ...defaultSort },
   }
-}
-
-function storageKey(userId: string): string {
-  return `${DASHBOARD_STORAGE_PREFIX}:${userId}`
-}
-
-function parseDashboards(value: string | null): TaskDashboard[] {
-  if (!value) {
-    return []
-  }
-
-  try {
-    const parsed = JSON.parse(value) as TaskDashboard[]
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-
-    return parsed.filter((item) => {
-      return (
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        item.filters !== undefined &&
-        item.sort !== undefined
-      )
-    })
-  } catch {
-    return []
-  }
-}
-
-function loadDashboards(userId: string): TaskDashboard[] {
-  if (typeof window === 'undefined') {
-    return [createDashboard()]
-  }
-
-  const saved = parseDashboards(window.localStorage.getItem(storageKey(userId)))
-  return saved.length > 0 ? saved : [createDashboard()]
 }
 
 function compareCriticality(left: AppealCriticality, right: AppealCriticality): number {
@@ -155,22 +120,35 @@ export function TaskBoardModule({
   clients,
   sites,
   products,
+  dashboards,
+  onSaveDashboards,
   onOpenAppeal,
 }: TaskBoardModuleProps) {
-  const [dashboards, setDashboards] = useState<TaskDashboard[]>(() => loadDashboards(user.id))
-  const [selectedDashboardId, setSelectedDashboardId] = useState<string>(() => {
-    const loaded = loadDashboards(user.id)
-    return loaded[0]?.id ?? ''
-  })
+  const [fallbackDashboard] = useState<TaskDashboard>(() => createDashboard())
+  const saveTimeoutRef = useRef<number | null>(null)
+  const pendingDashboardsRef = useRef<TaskDashboard[] | null>(null)
+  const effectiveDashboards = useMemo(
+    () => (dashboards.length > 0 ? dashboards : [fallbackDashboard]),
+    [dashboards, fallbackDashboard],
+  )
+  const [selectedDashboardId, setSelectedDashboardId] = useState<string>(
+    () => dashboards[0]?.id ?? fallbackDashboard.id,
+  )
   const [draggedDashboardId, setDraggedDashboardId] = useState<string | null>(null)
+  const [isSavingDashboards, setIsSavingDashboards] = useState(false)
+  const effectiveSelectedDashboardId = effectiveDashboards.some(
+    (dashboard) => dashboard.id === selectedDashboardId,
+  )
+    ? selectedDashboardId
+    : effectiveDashboards[0]?.id ?? ''
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
+    return () => {
+      if (saveTimeoutRef.current !== null) {
+        window.clearTimeout(saveTimeoutRef.current)
+      }
     }
-
-    window.localStorage.setItem(storageKey(user.id), JSON.stringify(dashboards))
-  }, [dashboards, user.id])
+  }, [])
 
   const visibleAppeals = useMemo(() => {
     if (user.role === 'admin') {
@@ -196,7 +174,9 @@ export function TaskBoardModule({
   }, [appeals, user])
 
   const selectedDashboard =
-    dashboards.find((dashboard) => dashboard.id === selectedDashboardId) ?? dashboards[0] ?? null
+    effectiveDashboards.find((dashboard) => dashboard.id === effectiveSelectedDashboardId) ??
+    effectiveDashboards[0] ??
+    null
 
   const dashboardAppeals = useMemo(() => {
     if (!selectedDashboard) {
@@ -227,7 +207,10 @@ export function TaskBoardModule({
         return false
       }
 
-      if (selectedDashboard.filters.type !== 'all' && appeal.typeId !== selectedDashboard.filters.type) {
+      if (
+        selectedDashboard.filters.type !== 'all' &&
+        appeal.typeId !== selectedDashboard.filters.type
+      ) {
         return false
       }
 
@@ -244,6 +227,7 @@ export function TaskBoardModule({
         ]
           .join(' ')
           .toLowerCase()
+
         if (!haystack.includes(normalized)) {
           return false
         }
@@ -258,29 +242,59 @@ export function TaskBoardModule({
     })
   }, [clients, employees, products, selectedDashboard, sites, visibleAppeals])
 
-  function updateSelectedDashboard(
-    updater: (dashboard: TaskDashboard) => TaskDashboard,
+  function scheduleDashboardsSave(nextDashboards: TaskDashboard[]): void {
+    pendingDashboardsRef.current = nextDashboards
+
+    if (saveTimeoutRef.current !== null) {
+      window.clearTimeout(saveTimeoutRef.current)
+    }
+
+    setIsSavingDashboards(true)
+    saveTimeoutRef.current = window.setTimeout(() => {
+      const dashboardsToSave = pendingDashboardsRef.current ?? nextDashboards
+      void onSaveDashboards(dashboardsToSave)
+        .catch((error: unknown) => {
+          window.alert(
+            error instanceof Error
+              ? error.message
+              : 'Не удалось сохранить кастомные дашборды.',
+          )
+        })
+        .finally(() => {
+          setIsSavingDashboards(false)
+        })
+    }, DASHBOARD_SAVE_DEBOUNCE_MS)
+  }
+
+  function updateDashboards(
+    updater: (currentDashboards: TaskDashboard[]) => TaskDashboard[],
   ): void {
-    setDashboards((previous) =>
-      previous.map((dashboard) =>
-        dashboard.id === selectedDashboardId ? updater(dashboard) : dashboard,
+    scheduleDashboardsSave(updater(effectiveDashboards))
+  }
+
+  function updateSelectedDashboard(updater: (dashboard: TaskDashboard) => TaskDashboard): void {
+    updateDashboards((currentDashboards) =>
+      currentDashboards.map((dashboard) =>
+        dashboard.id === effectiveSelectedDashboardId ? updater(dashboard) : dashboard,
       ),
     )
   }
 
   function addDashboard(): void {
-    const nextDashboard = createDashboard(`Дашборд ${dashboards.length + 1}`)
-    setDashboards((previous) => [...previous, nextDashboard])
+    const nextDashboard = createDashboard(`Дашборд ${effectiveDashboards.length + 1}`)
+    scheduleDashboardsSave([...effectiveDashboards, nextDashboard])
     setSelectedDashboardId(nextDashboard.id)
   }
 
   function deleteSelectedDashboard(): void {
-    if (dashboards.length <= 1) {
+    if (effectiveDashboards.length <= 1) {
       return
     }
 
-    const safeDashboards = dashboards.filter((dashboard) => dashboard.id !== selectedDashboardId)
-    setDashboards(safeDashboards)
+    const safeDashboards = effectiveDashboards.filter(
+      (dashboard) => dashboard.id !== effectiveSelectedDashboardId,
+    )
+    scheduleDashboardsSave(safeDashboards)
     setSelectedDashboardId(safeDashboards[0].id)
   }
 
@@ -297,17 +311,21 @@ export function TaskBoardModule({
     <section className="module-wrap">
       <div className="module-title-row">
         <h1>Доска задач</h1>
-        <p className="meta">Кастомные дашборды сохраняются локально для текущего пользователя.</p>
+        <p className="meta">
+          {isSavingDashboards
+            ? 'Сохраняем изменения дашбордов в аккаунт...'
+            : 'Кастомные дашборды сохраняются в аккаунте и доступны на разных устройствах.'}
+        </p>
       </div>
 
       <div className="dashboard-tabs-row">
         <div className="dashboard-tabs">
-          {dashboards.map((dashboard) => (
+          {effectiveDashboards.map((dashboard) => (
             <button
               key={dashboard.id}
               type="button"
               draggable
-              className={`dashboard-tab ${dashboard.id === selectedDashboardId ? 'is-active' : ''}`}
+              className={`dashboard-tab ${dashboard.id === effectiveSelectedDashboardId ? 'is-active' : ''}`}
               onClick={() => setSelectedDashboardId(dashboard.id)}
               onDragStart={() => setDraggedDashboardId(dashboard.id)}
               onDragOver={(event) => event.preventDefault()}
@@ -316,7 +334,9 @@ export function TaskBoardModule({
                   return
                 }
 
-                setDashboards((previous) => moveById(previous, draggedDashboardId, dashboard.id))
+                scheduleDashboardsSave(
+                  moveById(effectiveDashboards, draggedDashboardId, dashboard.id),
+                )
                 setDraggedDashboardId(null)
               }}
               onDragEnd={() => setDraggedDashboardId(null)}
@@ -334,7 +354,7 @@ export function TaskBoardModule({
             type="button"
             className="danger-button button-sm"
             onClick={deleteSelectedDashboard}
-            disabled={dashboards.length <= 1}
+            disabled={effectiveDashboards.length <= 1}
           >
             Удалить
           </button>

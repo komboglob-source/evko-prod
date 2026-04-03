@@ -21,6 +21,7 @@ import type {
 import { formatDateTime, truncate } from '../utils/format'
 import { renderMarkdown } from '../utils/markdown'
 import {
+  canAccessClosedComments,
   canChangeStatus,
   canCreateAppealType,
   canEditAppeal,
@@ -42,7 +43,12 @@ interface AppealsModuleProps {
   onOpenAppeal?: (appealId: string, archived: boolean) => void
   onCreateAppeal: (draft: Omit<Appeal, 'id'>) => Promise<void>
   onUpdateAppeal: (appealId: string, patch: Partial<Appeal>) => Promise<void>
-  onAddComment: (appealId: string, text: string, files: FileAttachment[]) => Promise<void>
+  onAddComment: (
+    appealId: string,
+    text: string,
+    isClosedComment: boolean,
+    files: FileAttachment[],
+  ) => Promise<void>
   onLinkAppeal: (
     appealId: string,
     linkedAppealId: string,
@@ -221,6 +227,8 @@ export function AppealsModule({
     defaultCreateState(user, clients, sites, products),
   )
   const [commentText, setCommentText] = useState('')
+  const [isClosedComment, setIsClosedComment] = useState(false)
+  const [isCommentPreviewOpen, setIsCommentPreviewOpen] = useState(false)
   const [linkedAppealCandidate, setLinkedAppealCandidate] = useState('')
   const [linkedAppealType, setLinkedAppealType] = useState<AppealLinkType>('related')
   const [editState, setEditState] = useState<EditFormState | null>(null)
@@ -236,8 +244,10 @@ export function AppealsModule({
   const [isCreating, setIsCreating] = useState(false)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isTakingInWork, setIsTakingInWork] = useState(false)
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false)
   const isCreatingRef = useRef(false)
   const isSavingEditRef = useRef(false)
+  const canUseClosedComments = canAccessClosedComments(user)
 
   const viewableAppeals = appeals.filter((appeal) => canViewAppeal(user, appeal))
 
@@ -452,12 +462,24 @@ export function AppealsModule({
   async function handleCommentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    if (!selectedAppeal || selectedAppeal.statusId === 'Verified' || !commentText.trim()) {
+    if (
+      !selectedAppeal ||
+      selectedAppeal.statusId === 'Verified' ||
+      !commentText.trim() ||
+      isSubmittingComment
+    ) {
       return
     }
 
-    await onAddComment(selectedAppeal.id, commentText.trim(), [])
-    setCommentText('')
+    setIsSubmittingComment(true)
+    try {
+      await onAddComment(selectedAppeal.id, commentText.trim(), isClosedComment, [])
+      setCommentText('')
+      setIsClosedComment(false)
+      setIsCommentPreviewOpen(false)
+    } finally {
+      setIsSubmittingComment(false)
+    }
   }
 
   async function handleLinkAppeal(): Promise<void> {
@@ -504,6 +526,9 @@ export function AppealsModule({
     const canLink = canLinkAppeals(user)
     const canManageLinks = canLink && !isVerified
     const canComment = !isVerified
+    const visibleComments = canUseClosedComments
+      ? selectedAppeal.comments
+      : selectedAppeal.comments.filter((comment) => !comment.isClosedComment)
     const canTakeInWork =
       selectedAppeal.statusId === 'Created' &&
       user.role !== 'client' &&
@@ -644,8 +669,37 @@ export function AppealsModule({
                     rows={5}
                     required
                   />
-                  <button type="submit" className="primary-button button-sm">
-                    Отправить комментарий
+
+                  <div className="comment-form-actions">
+                    <button
+                      type="button"
+                      className="ghost-button button-sm comment-preview-toggle"
+                      onClick={() => setIsCommentPreviewOpen(true)}
+                    >
+                      <span className="eye-icon" aria-hidden="true">
+                        <span className="eye-icon-pupil" />
+                      </span>
+                      Предосмотр комментария
+                    </button>
+
+                    {canUseClosedComments ? (
+                      <label className="comment-visibility-toggle">
+                        <input
+                          type="checkbox"
+                          checked={isClosedComment}
+                          onChange={(event) => setIsClosedComment(event.target.checked)}
+                        />
+                        <span>Закрытый комментарий</span>
+                      </label>
+                    ) : null}
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="primary-button button-sm"
+                    disabled={isSubmittingComment}
+                  >
+                    {isSubmittingComment ? 'Отправляем...' : 'Отправить комментарий'}
                   </button>
                 </form>
               ) : (
@@ -653,8 +707,8 @@ export function AppealsModule({
               )}
 
               <div className="comment-list">
-                {selectedAppeal.comments.length > 0 ? (
-                  selectedAppeal.comments
+                {visibleComments.length > 0 ? (
+                  visibleComments
                     .slice()
                     .sort(
                       (left, right) =>
@@ -670,6 +724,15 @@ export function AppealsModule({
                           >
                             {resolveCommentAuthor(comment)}
                           </button>
+                          {canUseClosedComments ? (
+                            <span
+                              className={`status-pill comment-visibility-pill ${
+                                comment.isClosedComment ? 'is-closed' : 'is-open'
+                              }`}
+                            >
+                              {comment.isClosedComment ? 'Закрытый' : 'Открытый'}
+                            </span>
+                          ) : null}
                           <span>{formatDateTime(comment.createdAt)}</span>
                         </div>
                         <div className="markdown-content">{renderMarkdown(comment.contents)}</div>
@@ -1201,6 +1264,37 @@ export function AppealsModule({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isCommentPreviewOpen ? (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsCommentPreviewOpen(false)
+            }
+          }}
+        >
+          <div className="modal-card">
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setIsCommentPreviewOpen(false)}
+              aria-label="Закрыть"
+            >
+              x
+            </button>
+
+            <div className="inline-form modal-form">
+              <h3 className="modal-title">Предосмотр комментария</h3>
+              {commentText.trim() ? (
+                <div className="preview-box markdown-content">{renderMarkdown(commentText)}</div>
+              ) : (
+                <p className="empty-inline">Комментарий пока пуст.</p>
+              )}
+            </div>
           </div>
         </div>
       ) : null}

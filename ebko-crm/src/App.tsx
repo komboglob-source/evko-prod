@@ -3,10 +3,12 @@ import './App.css'
 import {
   ApiError,
   loadCurrentProfile,
+  loadTaskDashboards,
   login,
   logout,
   refreshToken,
   syncCurrentProfile,
+  syncTaskDashboards,
 } from './api/auth'
 import {
   loadAppealById,
@@ -50,6 +52,7 @@ import type {
   LoginPayload,
   ModuleKey,
   Site,
+  TaskDashboard,
   UserProfile,
 } from './types'
 import { canAccessModule } from './utils/permissions'
@@ -162,10 +165,11 @@ function withCurrentUser(data: CrmBootstrapData, user: UserProfile): CrmBootstra
 async function hydrateSession(
   tokens: AuthTokens,
   fallbackUser?: UserProfile,
-): Promise<{ session: Session; data: CrmBootstrapData }> {
-  const [bootstrap, currentUserFromAPI] = await Promise.all([
+): Promise<{ session: Session; data: CrmBootstrapData; dashboards: TaskDashboard[] }> {
+  const [bootstrap, currentUserFromAPI, dashboards] = await Promise.all([
     loadCrmBootstrap(tokens),
     loadCurrentProfile(tokens),
+    loadTaskDashboards(tokens),
   ])
 
   const currentUser =
@@ -178,6 +182,7 @@ async function hydrateSession(
   return {
     session: { user: currentUser, tokens },
     data: withCurrentUser(bootstrap, currentUser),
+    dashboards,
   }
 }
 
@@ -216,6 +221,7 @@ function isAuthenticationError(error: unknown): boolean {
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [data, setData] = useState<CrmBootstrapData | null>(null)
+  const [taskDashboards, setTaskDashboards] = useState<TaskDashboard[]>([])
   const [activeModule, setActiveModule] = useState<ModuleKey>('appeals')
   const [selectedAppealId, setSelectedAppealId] = useState<string | null>(null)
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null)
@@ -248,7 +254,7 @@ function App() {
 
       try {
         let activeTokens = storedSession.tokens
-        let hydrated: { session: Session; data: CrmBootstrapData }
+        let hydrated: { session: Session; data: CrmBootstrapData; dashboards: TaskDashboard[] }
 
         try {
           hydrated = await hydrateSession(activeTokens, storedSession.user)
@@ -265,6 +271,7 @@ function App() {
         sessionRef.current = hydrated.session
         setSession(hydrated.session)
         setData(hydrated.data)
+        setTaskDashboards(hydrated.dashboards)
       } catch (error) {
         console.error('Session restore failed', error)
         clearStoredTokens()
@@ -272,6 +279,7 @@ function App() {
         if (!cancelled) {
           setSession(null)
           setData(null)
+          setTaskDashboards([])
         }
       } finally {
         if (!cancelled) {
@@ -301,6 +309,7 @@ function App() {
       sessionRef.current = hydrated.session
       setSession(hydrated.session)
       setData(hydrated.data)
+      setTaskDashboards(hydrated.dashboards)
       setActiveModule('appeals')
       setSelectedAppealId(null)
       setSelectedSiteId(null)
@@ -335,6 +344,7 @@ function App() {
     sessionRef.current = null
     setSession(null)
     setData(null)
+    setTaskDashboards([])
     setSelectedAppealId(null)
     setSelectedSiteId(null)
     setSelectedCustomerId(null)
@@ -413,6 +423,15 @@ function App() {
     sessionRef.current = hydrated.session
     setSession(hydrated.session)
     setData(hydrated.data)
+    setTaskDashboards(hydrated.dashboards)
+  }
+
+  async function saveTaskBoardDashboards(nextDashboards: TaskDashboard[]): Promise<void> {
+    setTaskDashboards(nextDashboards)
+    const savedDashboards = await withFreshTokens((activeTokens) =>
+      syncTaskDashboards(activeTokens, nextDashboards),
+    )
+    setTaskDashboards(savedDashboards)
   }
 
   function replaceAppeals(nextAppeals: Appeal[]): void {
@@ -462,12 +481,18 @@ function App() {
     ])
   }
 
-  async function addComment(appealId: string, contents: string, files: FileAttachment[]): Promise<void> {
+  async function addComment(
+    appealId: string,
+    contents: string,
+    isClosedComment: boolean,
+    files: FileAttachment[],
+  ): Promise<void> {
     await withFreshTokens((activeTokens) =>
       syncAppealComment(
         activeTokens,
         appealId,
         contents,
+        isClosedComment,
         files.map((file) => ({ name: file.name, size: file.size })),
       ),
     )
@@ -787,6 +812,8 @@ function App() {
             clients={currentData.clients}
             sites={currentData.sites}
             products={currentData.products}
+            dashboards={taskDashboards}
+            onSaveDashboards={saveTaskBoardDashboards}
             onOpenAppeal={(appealId, archived) => {
               setSelectedAppealId(appealId)
               setSelectedEmployeeId(null)

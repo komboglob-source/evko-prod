@@ -833,6 +833,7 @@ export async function syncAppealComment(
   tokens: AuthTokens,
   appealId: string,
   contents: string,
+  isClosedComment: boolean,
   _files: Array<{ name: string; size: number }>,
 ): Promise<void> {
   void _files
@@ -846,7 +847,7 @@ export async function syncAppealComment(
     await fetch(`${API_BASE_URL}/api/v1/appeals/${appealId}/comments`, {
       method: 'POST',
       headers: authHeaders(tokens),
-      body: JSON.stringify({ contents }),
+      body: JSON.stringify({ contents, is_closed_comment: isClosedComment }),
     }),
   )
 }
